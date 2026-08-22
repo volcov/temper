@@ -6,8 +6,9 @@ defmodule Temper.EnvTest do
   alias Temper.RunContext
 
   @env_vars ~w(
-    GITHUB_ACTIONS GITHUB_RUN_ID GITHUB_SHA GITHUB_REF_NAME
+    GITHUB_ACTIONS GITHUB_RUN_ID GITHUB_SHA GITHUB_REF_NAME GITHUB_HEAD_REF
     GITLAB_CI CI_PIPELINE_ID CI_COMMIT_SHA CI_COMMIT_REF_NAME
+    CI_MERGE_REQUEST_SOURCE_BRANCH_NAME
     CIRCLECI CIRCLE_WORKFLOW_ID CIRCLE_SHA1 CIRCLE_BRANCH
     MIX_TEST_PARTITION
   )
@@ -116,6 +117,19 @@ defmodule Temper.EnvTest do
       assert branch == "main"
     end
 
+    test "on pull_request events uses the source branch, not the merge ref" do
+      System.put_env("GITHUB_REF_NAME", "4/merge")
+      System.put_env("GITHUB_HEAD_REF", "feature/my-change")
+
+      assert %{branch: "feature/my-change"} = Env.gather()
+    end
+
+    test "ignores an empty GITHUB_HEAD_REF on push events" do
+      System.put_env("GITHUB_HEAD_REF", "")
+
+      assert %{branch: "main"} = Env.gather()
+    end
+
     test "falls back to local git when the sha variable is empty" do
       System.put_env("GITHUB_SHA", "")
 
@@ -138,6 +152,15 @@ defmodule Temper.EnvTest do
       assert ci == %{provider: "gitlab", run_id: "42"}
       assert sha == String.duplicate("cd", 20)
       assert branch == "my-feature"
+    end
+
+    test "on merge request pipelines prefers the source branch" do
+      System.put_env("GITLAB_CI", "true")
+      System.put_env("CI_COMMIT_SHA", String.duplicate("cd", 20))
+      System.put_env("CI_COMMIT_REF_NAME", "refs/merge-requests/7/head")
+      System.put_env("CI_MERGE_REQUEST_SOURCE_BRANCH_NAME", "fix/typo")
+
+      assert %{branch: "fix/typo"} = Env.gather()
     end
   end
 

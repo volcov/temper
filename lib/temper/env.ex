@@ -12,27 +12,31 @@ defmodule Temper.Env do
   @typedoc "Options for `gather/1`."
   @type option :: {:cd, Path.t()}
 
+  # The :branch list is checked in order and the first non-empty variable
+  # wins: pull-request/merge-request runs put a synthetic ref (e.g.
+  # "4/merge") in the usual branch variable and expose the real source
+  # branch in a PR-only variable.
   @providers [
     %{
       flag: "GITHUB_ACTIONS",
       name: "github",
       run_id: "GITHUB_RUN_ID",
       sha: "GITHUB_SHA",
-      branch: "GITHUB_REF_NAME"
+      branch: ["GITHUB_HEAD_REF", "GITHUB_REF_NAME"]
     },
     %{
       flag: "GITLAB_CI",
       name: "gitlab",
       run_id: "CI_PIPELINE_ID",
       sha: "CI_COMMIT_SHA",
-      branch: "CI_COMMIT_REF_NAME"
+      branch: ["CI_MERGE_REQUEST_SOURCE_BRANCH_NAME", "CI_COMMIT_REF_NAME"]
     },
     %{
       flag: "CIRCLECI",
       name: "circleci",
       run_id: "CIRCLE_WORKFLOW_ID",
       sha: "CIRCLE_SHA1",
-      branch: "CIRCLE_BRANCH"
+      branch: ["CIRCLE_BRANCH"]
     }
   ]
 
@@ -86,11 +90,21 @@ defmodule Temper.Env do
   defp git_info(provider, cd) do
     case provider && System.get_env(provider.sha) do
       sha when is_binary(sha) and sha != "" ->
-        %{sha: sha, dirty: false, branch: System.get_env(provider.branch)}
+        %{sha: sha, dirty: false, branch: first_env(provider.branch)}
 
       _no_ci_sha ->
         local_git_info(cd)
     end
+  end
+
+  defp first_env(vars) do
+    Enum.find_value(vars, fn var ->
+      case System.get_env(var) do
+        nil -> nil
+        "" -> nil
+        value -> value
+      end
+    end)
   end
 
   defp local_git_info(cd) do
