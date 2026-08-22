@@ -46,17 +46,22 @@ defmodule Temper.History.Writer do
 
   @doc """
   Appends one encoded test record as a line.
+
+  Device errors (a vanished file descriptor, a full disk) raise — the
+  formatter's crash guard turns them into a warning and goes inert.
   """
-  @spec append(t(), Record.t()) :: :ok | {:error, term()}
+  @spec append(t(), Record.t()) :: :ok
   def append(%__MODULE__{device: device}, %Record{} = record) do
     write_line(device, Codec.encode(record))
   end
 
   @doc """
   Appends the end-of-run suite summary line.
+
+  Raises on device errors, like `append/2`.
   """
   @spec append_suite(t(), RunContext.t(), %{tests: non_neg_integer(), times_us: map() | nil}) ::
-          :ok | {:error, term()}
+          :ok
   def append_suite(%__MODULE__{device: device}, %RunContext{} = context, summary) do
     write_line(device, Codec.encode_suite(context, summary))
   end
