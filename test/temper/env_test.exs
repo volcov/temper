@@ -64,7 +64,8 @@ defmodule Temper.EnvTest do
 
       assert sha =~ ~r/^[0-9a-f]{40}$/
       assert is_boolean(dirty)
-      assert is_binary(branch)
+      # Detached checkouts (e.g. CI runners) legitimately have no branch.
+      assert is_binary(branch) or is_nil(branch)
       assert ci == nil
     end
 
