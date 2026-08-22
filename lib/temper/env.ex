@@ -1,0 +1,128 @@
+defmodule Temper.Env do
+  @moduledoc """
+  Boundary module that gathers run context data from the real world:
+  git, CI environment variables, the system clock and the runtime.
+
+  `gather/1` returns a plain map suitable for `Temper.RunContext.new/1`.
+  All side effects live here so the core stays pure; every lookup
+  degrades gracefully (no git, no repository, no CI) to `nil` values
+  rather than raising.
+  """
+
+  @typedoc "Options for `gather/1`."
+  @type option :: {:cd, Path.t()}
+
+  @providers [
+    %{
+      flag: "GITHUB_ACTIONS",
+      name: "github",
+      run_id: "GITHUB_RUN_ID",
+      sha: "GITHUB_SHA",
+      branch: "GITHUB_REF_NAME"
+    },
+    %{
+      flag: "GITLAB_CI",
+      name: "gitlab",
+      run_id: "CI_PIPELINE_ID",
+      sha: "CI_COMMIT_SHA",
+      branch: "CI_COMMIT_REF_NAME"
+    },
+    %{
+      flag: "CIRCLECI",
+      name: "circleci",
+      run_id: "CIRCLE_WORKFLOW_ID",
+      sha: "CIRCLE_SHA1",
+      branch: "CIRCLE_BRANCH"
+    }
+  ]
+
+  @doc """
+  Gathers environment data into a plain map for `Temper.RunContext.new/1`.
+
+  The map always contains `:run_id` (fresh 16-byte random hex), `:at`
+  (UTC ISO 8601, second precision), `:elixir`, `:otp`, `:partition`
+  (from `MIX_TEST_PARTITION`), `:ci`, `:sha`, `:dirty` and `:branch`.
+
+  Git data prefers the CI provider's environment variables (e.g.
+  `GITHUB_SHA`) over shelling out, since CI checkouts are clean by
+  construction. Outside CI it runs `git rev-parse`/`git status` in
+  `opts[:cd]` (default: the current directory) and returns `nil` values
+  outside a repository or without git installed.
+
+  The ExUnit `:seed` is intentionally absent — only the formatter knows
+  it, and merges it into this map itself.
+  """
+  @spec gather([option()]) :: map()
+  def gather(opts \\ []) do
+    cd = Keyword.get(opts, :cd, File.cwd!())
+    provider = detect_provider()
+
+    %{
+      run_id: generate_run_id(),
+      at: utc_now_iso8601(),
+      elixir: System.version(),
+      otp: System.otp_release(),
+      partition: System.get_env("MIX_TEST_PARTITION"),
+      ci: ci_info(provider)
+    }
+    |> Map.merge(git_info(provider, cd))
+  end
+
+  defp generate_run_id do
+    16 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
+  end
+
+  defp utc_now_iso8601 do
+    DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+  end
+
+  defp detect_provider do
+    Enum.find(@providers, fn provider -> System.get_env(provider.flag) == "true" end)
+  end
+
+  defp ci_info(nil), do: nil
+  defp ci_info(provider), do: %{provider: provider.name, run_id: System.get_env(provider.run_id)}
+
+  defp git_info(provider, cd) do
+    case provider && System.get_env(provider.sha) do
+      sha when is_binary(sha) and sha != "" ->
+        %{sha: sha, dirty: false, branch: System.get_env(provider.branch)}
+
+      _no_ci_sha ->
+        local_git_info(cd)
+    end
+  end
+
+  defp local_git_info(cd) do
+    case git(["rev-parse", "HEAD"], cd) do
+      {:ok, sha} -> %{sha: sha, dirty: dirty?(cd), branch: local_branch(cd)}
+      :error -> %{sha: nil, dirty: false, branch: nil}
+    end
+  end
+
+  defp dirty?(cd) do
+    case git(["status", "--porcelain"], cd) do
+      {:ok, output} -> output != ""
+      :error -> false
+    end
+  end
+
+  defp local_branch(cd) do
+    case git(["rev-parse", "--abbrev-ref", "HEAD"], cd) do
+      # "HEAD" means a detached checkout, so there is no branch name.
+      {:ok, "HEAD"} -> nil
+      {:ok, branch} -> branch
+      :error -> nil
+    end
+  end
+
+  defp git(args, cd) do
+    case System.cmd("git", args, cd: cd, stderr_to_stdout: true) do
+      {output, 0} -> {:ok, String.trim(output)}
+      {_output, _nonzero} -> :error
+    end
+  rescue
+    # git not installed, or cd does not exist.
+    ErlangError -> :error
+  end
+end
