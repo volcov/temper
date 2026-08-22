@@ -162,6 +162,53 @@ defmodule Temper.History.CodecTest do
                |> Codec.decode()
     end
 
+    test "wrong-typed values" do
+      bad_values = [
+        {"run_id", nil},
+        {"at", 20_260_821},
+        {"module", 42},
+        {"name", ["test"]},
+        {"sha", 123},
+        {"branch", true},
+        {"dirty", "yes"},
+        {"async", 1},
+        {"seed", -1},
+        {"seed", "493821"},
+        {"time_us", "fast"},
+        {"line", 0},
+        {"ci", "github"},
+        {"ci", %{"run_id" => "123"}},
+        {"ci", %{"provider" => "github", "run_id" => 123}},
+        {"failure", "boom"},
+        {"failure", %{"kind" => "RuntimeError"}},
+        {"failure", %{"kind" => "RuntimeError", "message" => "boom", "hash" => 42}}
+      ]
+
+      for {key, value} <- bad_values do
+        line =
+          @full_record
+          |> Codec.encode()
+          |> Jason.decode!()
+          |> Map.put(key, value)
+          |> Jason.encode!()
+
+        assert Codec.decode(line) == {:error, {:invalid_type, key}},
+               "expected #{key}=#{inspect(value)} to be rejected"
+      end
+    end
+
+    test "a ci map without a run_id stays valid" do
+      line =
+        @full_record
+        |> Codec.encode()
+        |> Jason.decode!()
+        |> Map.put("ci", %{"provider" => "github"})
+        |> Jason.encode!()
+
+      assert {:ok, record} = Codec.decode(line)
+      assert record.context.ci == %{provider: "github", run_id: nil}
+    end
+
     test "unknown status" do
       line =
         @full_record

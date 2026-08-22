@@ -30,6 +30,29 @@ defmodule Temper.History.Codec do
     "invalid" => :invalid
   }
 
+  # Wrong-typed values must fail decoding, not produce records that
+  # violate the Record.t()/RunContext.t() contracts downstream.
+  @field_types [
+    {"run_id", :string},
+    {"at", :string},
+    {"elixir", :string},
+    {"otp", :string},
+    {"module", :string},
+    {"name", :string},
+    {"sha", :optional_string},
+    {"branch", :optional_string},
+    {"partition", :optional_string},
+    {"file", :optional_string},
+    {"test_type", :optional_string},
+    {"dirty", :optional_boolean},
+    {"async", :optional_boolean},
+    {"seed", :optional_non_neg_integer},
+    {"time_us", :optional_non_neg_integer},
+    {"line", :optional_pos_integer},
+    {"ci", :optional_ci},
+    {"failure", :optional_failure}
+  ]
+
   @typedoc "Reasons `decode/1` can reject a line."
   @type decode_error ::
           :invalid_json
@@ -37,6 +60,7 @@ defmodule Temper.History.Codec do
           | {:unsupported_kind, term()}
           | {:missing_key, String.t()}
           | {:invalid_status, term()}
+          | {:invalid_type, String.t()}
 
   @doc """
   Encodes a record as a single JSON line, without a trailing newline.
@@ -81,7 +105,8 @@ defmodule Temper.History.Codec do
          :ok <- check_schema(map),
          :ok <- check_kind(map),
          :ok <- check_required_keys(map),
-         {:ok, status} <- check_status(map) do
+         {:ok, status} <- check_status(map),
+         :ok <- check_field_types(map) do
       {:ok, build_record(map, status)}
     end
   end
@@ -115,6 +140,42 @@ defmodule Temper.History.Codec do
       :error -> {:error, {:invalid_status, status}}
     end
   end
+
+  defp check_field_types(map) do
+    invalid =
+      Enum.find(@field_types, fn {key, type} ->
+        not valid_type?(Map.get(map, key), type)
+      end)
+
+    case invalid do
+      nil -> :ok
+      {key, _type} -> {:error, {:invalid_type, key}}
+    end
+  end
+
+  defp valid_type?(value, :string), do: is_binary(value)
+  defp valid_type?(nil, _optional_type), do: true
+  defp valid_type?(value, :optional_string), do: is_binary(value)
+  defp valid_type?(value, :optional_boolean), do: is_boolean(value)
+  defp valid_type?(value, :optional_non_neg_integer), do: is_integer(value) and value >= 0
+  defp valid_type?(value, :optional_pos_integer), do: is_integer(value) and value > 0
+  defp valid_type?(value, :optional_ci), do: valid_ci?(value)
+  defp valid_type?(value, :optional_failure), do: valid_failure?(value)
+
+  defp valid_ci?(%{"provider" => provider} = ci) when is_binary(provider) do
+    case Map.get(ci, "run_id") do
+      nil -> true
+      run_id -> is_binary(run_id)
+    end
+  end
+
+  defp valid_ci?(_malformed), do: false
+
+  defp valid_failure?(%{"kind" => kind, "message" => message, "hash" => hash}) do
+    is_binary(kind) and is_binary(message) and is_binary(hash)
+  end
+
+  defp valid_failure?(_malformed), do: false
 
   defp build_record(map, status) do
     context =
