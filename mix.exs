@@ -26,6 +26,7 @@ defmodule Temper.MixProject do
 
   defp deps do
     [
+      {:jason, "~> 1.4"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
