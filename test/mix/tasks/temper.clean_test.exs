@@ -37,6 +37,20 @@ defmodule Mix.Tasks.Temper.CleanTest do
     assert File.read!(unrelated) == "kept"
   end
 
+  test "skips directories caught by the glob instead of aborting", %{dir: dir} do
+    File.write!(Path.join(dir, "history-0.jsonl"), "{}\n")
+    trap = Path.join(dir, "history-1.jsonl")
+    File.mkdir_p!(trap)
+
+    output = run_clean(["--history", Path.join(dir, "history-*.jsonl")])
+
+    assert output == "Deleted 1 history files."
+    assert_received {:mix_shell, :error, [error]}
+    assert error == "Skipping #{trap}: not a regular file."
+    assert File.dir?(trap)
+    refute File.exists?(Path.join(dir, "history-0.jsonl"))
+  end
+
   test "says so when there is nothing to delete", %{dir: dir} do
     glob = Path.join(dir, "history-*.jsonl")
 

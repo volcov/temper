@@ -31,13 +31,21 @@ defmodule Mix.Tasks.Temper.Clean do
     source =
       opts[:history] || Application.get_env(:temper, :history_path) || Reader.default_glob()
 
-    files = Path.wildcard(source)
+    matches = Path.wildcard(source)
+    {files, directories} = Enum.split_with(matches, &File.regular?/1)
+    {deleted, failed} = Enum.split_with(files, fn file -> File.rm(file) == :ok end)
 
-    Enum.each(files, &File.rm!/1)
+    Enum.each(directories, fn dir ->
+      Mix.shell().error("Skipping #{dir}: not a regular file.")
+    end)
 
-    case files do
+    Enum.each(failed, fn file ->
+      Mix.shell().error("Could not delete #{file}.")
+    end)
+
+    case matches do
       [] -> Mix.shell().info("No history files matching #{source}.")
-      files -> Mix.shell().info("Deleted #{length(files)} history files.")
+      _matches -> Mix.shell().info("Deleted #{length(deleted)} history files.")
     end
   end
 end

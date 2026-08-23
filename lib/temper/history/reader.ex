@@ -17,13 +17,15 @@ defmodule Temper.History.Reader do
 
   @typedoc """
   The outcome of a read: decoded records in file order, the files that
-  matched the glob, and counters for skipped lines.
+  were actually read, counters for skipped lines, and any matches that
+  could not be read at all (directories, files removed mid-read).
   """
   @type result :: %{
           records: [Record.t()],
           files: [Path.t()],
           corrupt: non_neg_integer(),
-          skipped: non_neg_integer()
+          skipped: non_neg_integer(),
+          unreadable: [Path.t()]
         }
 
   @doc """
@@ -36,24 +38,35 @@ defmodule Temper.History.Reader do
   Reads every history file matching `glob` into records.
 
   Defaults to `#{inspect(@default_glob)}`. Files are read in sorted
-  order; blank lines are ignored. Undecodable lines are counted
-  instead of raising: `:corrupt` for malformed content (invalid JSON,
-  missing keys, wrong types), `:skipped` for lines that are valid but
-  not test outcomes (kind `"suite"` summaries, future schema versions).
+  order; blank lines are ignored. Nothing about imperfect input
+  raises: undecodable lines are counted (`:corrupt` for malformed
+  content, `:skipped` for valid lines that are not test outcomes, such
+  as suite summaries and future schema versions), and matches that
+  cannot be read at all — a directory caught by the glob, a file
+  deleted between matching and opening — land in `:unreadable` while
+  every other file's records survive.
   """
   @spec read(Path.t()) :: result()
   def read(glob \\ @default_glob) do
-    files = glob |> Path.wildcard() |> Enum.sort()
-    initial = %{records: [], files: files, corrupt: 0, skipped: 0}
+    {regular, unreadable} =
+      glob |> Path.wildcard() |> Enum.sort() |> Enum.split_with(&File.regular?/1)
 
-    result = Enum.reduce(files, initial, &read_file/2)
-    %{result | records: Enum.reverse(result.records)}
+    initial = %{records: [], files: [], corrupt: 0, skipped: 0, unreadable: unreadable}
+
+    result = Enum.reduce(regular, initial, &read_file/2)
+    %{result | records: Enum.reverse(result.records), files: Enum.reverse(result.files)}
   end
 
   defp read_file(path, acc) do
-    path
-    |> File.stream!()
-    |> Enum.reduce(acc, fn line, acc -> collect(String.trim(line), acc) end)
+    read =
+      path
+      |> File.stream!()
+      |> Enum.reduce(acc, fn line, acc -> collect(String.trim(line), acc) end)
+
+    %{read | files: [path | read.files]}
+  rescue
+    # The file existed when the glob matched but cannot be read now.
+    File.Error -> %{acc | unreadable: acc.unreadable ++ [path]}
   end
 
   defp collect("", acc), do: acc
