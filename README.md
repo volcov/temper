@@ -25,10 +25,14 @@ dependencies beyond [Jason](https://hex.pm/packages/jason).
 # mix.exs
 def deps do
   [
-    {:temper, "~> 0.1", only: :test}
+    {:temper, "~> 0.1", only: [:dev, :test], runtime: false}
   ]
 end
 ```
+
+(`only: [:dev, :test]` — not just `:test` — keeps `mix temper.report`
+available in your default env; `runtime: false` keeps Temper out of
+releases and never starts it as an application.)
 
 ```elixir
 # test/test_helper.exs
@@ -110,6 +114,33 @@ run `mix temper.report`; it reads every `history-*.jsonl` it finds.
 
 `mix temper.report` always exits 0 — it informs, it does not gate CI.
 
+## Umbrella projects
+
+Three lines cover the whole umbrella — no per-app edits:
+
+```elixir
+# mix.exs (umbrella root)
+{:temper, "~> 0.1", only: [:dev, :test], runtime: false}
+
+# config/test.exs — registers the formatter for every child app;
+# ExUnit.start/1 reads persisted :ex_unit config, so test_helper.exs
+# files stay untouched (an explicit formatters: option passed to
+# ExUnit.start in a child app would override this)
+config :ex_unit, formatters: [ExUnit.CLIFormatter, Temper.Formatter]
+
+# config/config.exs — NOT test.exs: mix temper.report runs in the dev
+# env and must resolve the same path the test-env formatter writes to.
+# Child apps run tests with their own directory as cwd, so pin one
+# absolute file at the umbrella root; sequential suites append safely.
+config :temper, history_path: Path.expand("../.temper/history.jsonl", __DIR__)
+```
+
+The root-only dependency works because umbrella apps share one
+`_build`, keeping the formatter loadable during every child's test run
+(verified on Elixir 1.15 through 1.20). If a future Elixir prunes
+child load paths harder, the always-correct fallback is declaring the
+dependency in each child app instead — everything else stays the same.
+
 ## Containers and environments without git
 
 Detection needs a commit SHA on every record — without one, runs can
@@ -136,7 +167,7 @@ report footer that never flags anything: check a history line for
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `config :temper, history_path: "..."` | `.temper/history-{partition}.jsonl` | where history is written and read |
+| `config :temper, history_path: "..."` | `.temper/history-{partition}.jsonl` | where history is written and read — set it in `config/config.exs`, not `test.exs`, so the dev-env `mix temper.report` sees it too |
 | `--history GLOB` (report/clean) | the setting above | one-off override |
 | `--min-runs N` (report) | `2` | evidence threshold per SHA |
 | `--json` (report) | off | machine-readable output |
