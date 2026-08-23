@@ -85,8 +85,16 @@ defmodule Temper.Formatter do
 
   defp finish(state, times_us) do
     Writer.append_suite(state.writer, state.context, %{tests: state.tests, times_us: times_us})
-    Writer.close(state.writer)
-    %{state | writer: nil}
+
+    # The close flushes buffered lines — an error here means history was
+    # lost and deserves the promised warning, not silence.
+    case Writer.close(state.writer) do
+      :ok ->
+        %{state | writer: nil}
+
+      {:error, reason} ->
+        go_inert(%{state | writer: nil}, "could not close history file (#{inspect(reason)})")
+    end
   end
 
   defp safely(%{inert: true} = state, _handler), do: state

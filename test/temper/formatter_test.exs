@@ -47,6 +47,23 @@ defmodule Temper.FormatterTest do
     path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Codec.decode/1)
   end
 
+  # A fake io device: accepts writes, but reports :enospc on close —
+  # the shape of a full disk surfacing only at the final flush.
+  defp close_error_device do
+    spawn(fn -> close_error_device_loop() end)
+  end
+
+  defp close_error_device_loop do
+    receive do
+      {:io_request, from, reply_as, {:put_chars, _encoding, _chars}} ->
+        send(from, {:io_reply, reply_as, :ok})
+        close_error_device_loop()
+
+      {:file_request, from, reply_as, :close} ->
+        send(from, {:file_reply, reply_as, {:error, :enospc}})
+    end
+  end
+
   describe "a full suite run" do
     test "records each test and a suite summary line", %{history_path: history_path} do
       {:ok, state} = Formatter.init(seed: 494_000)
@@ -147,6 +164,24 @@ defmodule Temper.FormatterTest do
         end)
 
       assert output == ""
+    end
+
+    test "a close error at suite end warns instead of losing history silently" do
+      {:ok, state} = Formatter.init(seed: 1)
+      state = run_events(state, [{:suite_started, []}])
+
+      # Swap in a device that accepts writes but fails the closing flush.
+      broken_writer = %Temper.History.Writer{device: close_error_device(), path: "fake.jsonl"}
+      state = %{state | writer: broken_writer}
+
+      {state, output} =
+        with_io(:stderr, fn ->
+          run_events(state, [{:suite_finished, %{run: 1, async: nil, load: nil}}])
+        end)
+
+      assert output =~ "Temper disabled for this run"
+      assert output =~ "could not close history file"
+      assert state.inert
     end
 
     test "an exception inside a handler makes the formatter inert, not dead", %{
