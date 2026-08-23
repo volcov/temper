@@ -93,6 +93,27 @@ defmodule Temper.History.Codec do
   end
 
   @doc """
+  Encodes the end-of-run suite summary as a single JSON line.
+
+  Suite lines share the schema stamp but use kind `"suite"`; `decode/1`
+  rejects them with `{:error, {:unsupported_kind, "suite"}}` so readers
+  that only want test outcomes skip them without treating them as
+  corruption.
+  """
+  @spec encode_suite(RunContext.t(), %{tests: non_neg_integer(), times_us: map() | nil}) ::
+          String.t()
+  def encode_suite(%RunContext{} = context, summary) do
+    Jason.encode!(%{
+      "schema" => @schema,
+      "kind" => "suite",
+      "run_id" => context.run_id,
+      "at" => context.at,
+      "tests" => summary.tests,
+      "times_us" => summary.times_us
+    })
+  end
+
+  @doc """
   Decodes one history line back into a `Temper.Record`.
 
   Returns `{:error, reason}` for malformed JSON, unknown schema
