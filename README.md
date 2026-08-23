@@ -21,9 +21,6 @@ dependencies beyond [Jason](https://hex.pm/packages/jason).
 
 ## Quickstart
 
-> ⚠️ Temper is under active development and not yet published to hex.
-> The instructions below describe the upcoming v0.1 release.
-
 ```elixir
 # mix.exs
 def deps do
@@ -118,6 +115,15 @@ all.
 
 If Temper itself ever hits an error, it warns once and goes inert for
 the rest of the run — it will never break your test suite.
+
+## Status & feedback
+
+Temper is young (v0.1.x) and the history schema, report format and
+flags may still change before 1.0. It is in real use, but if anything
+surprises you — a test wrongly flagged, one that should have been, a
+crash, a confusing report — please
+[open an issue](https://github.com/volcov/temper/issues). Early
+feedback is what shapes what gets built next.
 
 ## License
 
