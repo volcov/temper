@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `TEMPER_SHA`, `TEMPER_DIRTY` and `TEMPER_BRANCH` environment
+  variables override git context detection — for containers and other
+  environments where git cannot answer. A non-empty `TEMPER_SHA`
+  activates manual mode and takes priority over CI variables and
+  local git.
+
 ## [0.1.0] - 2026-08-22
 
 ### Added

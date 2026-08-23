@@ -47,11 +47,21 @@ defmodule Temper.Env do
   (UTC ISO 8601, second precision), `:elixir`, `:otp`, `:partition`
   (from `MIX_TEST_PARTITION`), `:ci`, `:sha`, `:dirty` and `:branch`.
 
-  Git data prefers the CI provider's environment variables (e.g.
-  `GITHUB_SHA`) over shelling out, since CI checkouts are clean by
-  construction. Outside CI it runs `git rev-parse`/`git status` in
-  `opts[:cd]` (default: the current directory) and returns `nil` values
-  outside a repository or without git installed.
+  Git data is resolved with the first source that answers:
+
+  1. **Manual override** — a non-empty `TEMPER_SHA` switches git
+     context to manual mode: `:sha` from `TEMPER_SHA`, `:dirty` from
+     `TEMPER_DIRTY` (`"true"`/`"1"`/`"yes"`, default `false`),
+     `:branch` from `TEMPER_BRANCH` (default `nil`). For environments
+     where git is out of reach — a test container without the `.git`
+     directory, a sandboxed build — pass the values in from outside.
+     Without `TEMPER_SHA`, the other two `TEMPER_*` variables are
+     ignored.
+  2. **CI provider variables** (e.g. `GITHUB_SHA`) — CI checkouts are
+     clean by construction, so no shelling out.
+  3. **Local git** — `git rev-parse`/`git status` in `opts[:cd]`
+     (default: the current directory); `nil` values outside a
+     repository or without git installed.
 
   The ExUnit `:seed` is intentionally absent — only the formatter knows
   it, and merges it into this map itself.
@@ -88,12 +98,32 @@ defmodule Temper.Env do
   defp ci_info(provider), do: %{provider: provider.name, run_id: System.get_env(provider.run_id)}
 
   defp git_info(provider, cd) do
-    case provider && System.get_env(provider.sha) do
+    manual_git_info() || ci_git_info(provider) || local_git_info(cd)
+  end
+
+  defp manual_git_info do
+    case first_env(["TEMPER_SHA"]) do
+      nil ->
+        nil
+
+      sha ->
+        %{
+          sha: sha,
+          dirty: System.get_env("TEMPER_DIRTY") in ~w(true 1 yes),
+          branch: first_env(["TEMPER_BRANCH"])
+        }
+    end
+  end
+
+  defp ci_git_info(nil), do: nil
+
+  defp ci_git_info(provider) do
+    case System.get_env(provider.sha) do
       sha when is_binary(sha) and sha != "" ->
         %{sha: sha, dirty: false, branch: first_env(provider.branch)}
 
       _no_ci_sha ->
-        local_git_info(cd)
+        nil
     end
   end
 

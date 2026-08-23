@@ -11,6 +11,7 @@ defmodule Temper.EnvTest do
     CI_MERGE_REQUEST_SOURCE_BRANCH_NAME
     CIRCLECI CIRCLE_WORKFLOW_ID CIRCLE_SHA1 CIRCLE_BRANCH
     MIX_TEST_PARTITION
+    TEMPER_SHA TEMPER_BRANCH TEMPER_DIRTY
   )
 
   setup do
@@ -94,6 +95,72 @@ defmodule Temper.EnvTest do
 
     test "leaves partition nil when MIX_TEST_PARTITION is unset" do
       assert %{partition: nil} = Env.gather()
+    end
+  end
+
+  describe "gather/1 with TEMPER_* overrides" do
+    test "TEMPER_SHA switches git context to manual mode" do
+      System.put_env("TEMPER_SHA", String.duplicate("ff", 20))
+
+      %{sha: sha, dirty: dirty, branch: branch, ci: ci} = Env.gather()
+
+      assert sha == String.duplicate("ff", 20)
+      # Manual mode ignores local git entirely, even inside a repository.
+      assert dirty == false
+      assert branch == nil
+      assert ci == nil
+    end
+
+    test "TEMPER_DIRTY and TEMPER_BRANCH complete the manual context" do
+      System.put_env("TEMPER_SHA", String.duplicate("ff", 20))
+      System.put_env("TEMPER_DIRTY", "true")
+      System.put_env("TEMPER_BRANCH", "fix/flakys")
+
+      assert %{dirty: true, branch: "fix/flakys"} = Env.gather()
+    end
+
+    for {value, expected} <- [{"1", true}, {"yes", true}, {"false", false}, {"0", false}] do
+      test "TEMPER_DIRTY=#{value} means dirty: #{expected}" do
+        System.put_env("TEMPER_SHA", String.duplicate("ff", 20))
+        System.put_env("TEMPER_DIRTY", unquote(value))
+
+        assert %{dirty: unquote(expected)} = Env.gather()
+      end
+    end
+
+    test "manual mode beats CI provider variables" do
+      System.put_env("GITHUB_ACTIONS", "true")
+      System.put_env("GITHUB_RUN_ID", "1234567")
+      System.put_env("GITHUB_SHA", String.duplicate("ab", 20))
+      System.put_env("GITHUB_REF_NAME", "main")
+      System.put_env("TEMPER_SHA", String.duplicate("ff", 20))
+
+      %{sha: sha, branch: branch, ci: ci} = Env.gather()
+
+      assert sha == String.duplicate("ff", 20)
+      assert branch == nil
+      # The ci field still reports the detected provider.
+      assert ci == %{provider: "github", run_id: "1234567"}
+    end
+
+    test "an empty TEMPER_SHA does not activate manual mode" do
+      System.put_env("TEMPER_SHA", "")
+      System.put_env("TEMPER_BRANCH", "ignored")
+
+      %{sha: sha, branch: branch} = Env.gather()
+
+      assert sha =~ ~r/^[0-9a-f]{40}$/
+      refute branch == "ignored"
+    end
+
+    test "TEMPER_DIRTY and TEMPER_BRANCH alone are ignored" do
+      System.put_env("TEMPER_DIRTY", "true")
+      System.put_env("TEMPER_BRANCH", "ignored")
+
+      %{sha: sha, branch: branch} = Env.gather()
+
+      assert sha =~ ~r/^[0-9a-f]{40}$/
+      refute branch == "ignored"
     end
   end
 
