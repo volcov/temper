@@ -130,9 +130,15 @@ config :ex_unit, formatters: [ExUnit.CLIFormatter, Temper.Formatter]
 
 # config/config.exs — NOT test.exs: mix temper.report runs in the dev
 # env and must resolve the same path the test-env formatter writes to.
-# Child apps run tests with their own directory as cwd, so pin one
-# absolute file at the umbrella root; sequential suites append safely.
-config :temper, history_path: Path.expand("../.temper/history.jsonl", __DIR__)
+# Child apps run tests with their own directory as cwd, so pin the
+# history at the umbrella root — keeping one file per partition, since
+# concurrent partitioned jobs must never share a file.
+config :temper,
+  history_path:
+    Path.expand(
+      "../.temper/history-#{System.get_env("MIX_TEST_PARTITION") || "0"}.jsonl",
+      __DIR__
+    )
 ```
 
 The root-only dependency works because umbrella apps share one
@@ -140,6 +146,12 @@ The root-only dependency works because umbrella apps share one
 (verified on Elixir 1.15 through 1.20). If a future Elixir prunes
 child load paths harder, the always-correct fallback is declaring the
 dependency in each child app instead — everything else stays the same.
+
+Within one `mix test` invocation the child suites run sequentially in
+a single VM, so sharing a partition's file is safe. Partitioned jobs
+each write their own file, exactly like the default layout — when
+reporting across partitions, pass the glob from the umbrella root:
+`mix temper.report --history ".temper/history-*.jsonl"`.
 
 ## Containers and environments without git
 
