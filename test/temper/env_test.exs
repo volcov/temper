@@ -143,14 +143,28 @@ defmodule Temper.EnvTest do
       assert ci == %{provider: "github", run_id: "1234567"}
     end
 
-    test "an empty TEMPER_SHA does not activate manual mode" do
-      System.put_env("TEMPER_SHA", "")
-      System.put_env("TEMPER_BRANCH", "ignored")
+    test "an empty or whitespace-only TEMPER_SHA does not activate manual mode" do
+      for value <- ["", "  ", "\n"] do
+        System.put_env("TEMPER_SHA", value)
+        System.put_env("TEMPER_BRANCH", "ignored")
 
-      %{sha: sha, branch: branch} = Env.gather()
+        %{sha: sha, branch: branch} = Env.gather()
 
-      assert sha =~ ~r/^[0-9a-f]{40}$/
-      refute branch == "ignored"
+        assert sha =~ ~r/^[0-9a-f]{40}$/
+        refute branch == "ignored"
+      end
+    end
+
+    test "injected values are trimmed to match local git normalization" do
+      System.put_env("TEMPER_SHA", " #{String.duplicate("ff", 20)}\n")
+      System.put_env("TEMPER_BRANCH", "fix/flakys\n")
+      System.put_env("TEMPER_DIRTY", "true\n")
+
+      %{sha: sha, branch: branch, dirty: dirty} = Env.gather()
+
+      assert sha == String.duplicate("ff", 20)
+      assert branch == "fix/flakys"
+      assert dirty == true
     end
 
     test "TEMPER_DIRTY and TEMPER_BRANCH alone are ignored" do

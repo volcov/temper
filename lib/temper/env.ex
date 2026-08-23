@@ -109,7 +109,7 @@ defmodule Temper.Env do
       sha ->
         %{
           sha: sha,
-          dirty: System.get_env("TEMPER_DIRTY") in ~w(true 1 yes),
+          dirty: first_env(["TEMPER_DIRTY"]) in ~w(true 1 yes),
           branch: first_env(["TEMPER_BRANCH"])
         }
     end
@@ -118,19 +118,17 @@ defmodule Temper.Env do
   defp ci_git_info(nil), do: nil
 
   defp ci_git_info(provider) do
-    case System.get_env(provider.sha) do
-      sha when is_binary(sha) and sha != "" ->
-        %{sha: sha, dirty: false, branch: first_env(provider.branch)}
-
-      _no_ci_sha ->
-        nil
+    case first_env([provider.sha]) do
+      nil -> nil
+      sha -> %{sha: sha, dirty: false, branch: first_env(provider.branch)}
     end
   end
 
+  # Environment values are trimmed so an injected "abc\n" groups with
+  # the "abc" local git resolves — and whitespace-only counts as unset.
   defp first_env(vars) do
     Enum.find_value(vars, fn var ->
-      case System.get_env(var) do
-        nil -> nil
+      case String.trim(System.get_env(var) || "") do
         "" -> nil
         value -> value
       end
