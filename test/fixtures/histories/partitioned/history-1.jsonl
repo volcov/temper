@@ -1,0 +1,1 @@
+{"schema":1,"kind":"test","run_id":"p1run1","at":"2026-08-20T12:00:00Z","elixir":"1.20.2","otp":"27","module":"DemoTest","name":"test flaky","status":"failed","sha":"aaa1111","dirty":false,"seed":103,"partition":"1","failure":{"kind":"ExUnit.AssertionError","message":"Assertion with == failed","hash":"c0ffee12"}}

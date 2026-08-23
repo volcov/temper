@@ -1,0 +1,7 @@
+{"schema":1,"kind":"test","run_id":"r1","at":"2026-08-20T10:00:00Z","elixir":"1.20.2","otp":"27","module":"DemoTest","name":"test stable","status":"passed","sha":"aaa1111","dirty":false,"seed":100}
+this line is not JSON at all
+
+{"schema":1,"kind":"test","run_id":"r1","at":"2026-08-20T10:0
+{"schema":1,"kind":"suite","run_id":"r1","at":"2026-08-20T10:00:01Z","tests":1,"times_us":{"run":1000,"async":null,"load":null}}
+{"schema":2,"kind":"test","run_id":"r9","at":"2027-01-01T00:00:00Z","elixir":"2.0.0","otp":"30","module":"FutureTest","name":"test future","status":"passed"}
+{"schema":1,"kind":"test","run_id":"r2","at":"2026-08-20T11:00:00Z","elixir":"1.20.2","otp":"27","module":"DemoTest","name":"test stable","status":"failed","sha":"aaa1111","dirty":false,"seed":200,"time_us":"not an integer"}
