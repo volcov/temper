@@ -90,10 +90,23 @@ history — for GitHub Actions:
 ```
 
 The `run_id`-suffixed key makes every run save a fresh cache entry
-while restoring the most recent previous one. Partitioned suites
-(`MIX_TEST_PARTITION`) write one history file per partition, so
-parallel jobs never clobber each other; `mix temper.report` reads them
-all.
+while restoring the most recent previous one.
+
+**Parallel test jobs** need one cache lineage per partition — cache
+keys are immutable, so parallel jobs saving the same key would keep
+only the first job's history. Add the partition to the key:
+
+```yaml
+    key: temper-${{ github.ref_name }}-${{ matrix.partition }}-${{ github.run_id }}
+    restore-keys: |
+      temper-${{ github.ref_name }}-${{ matrix.partition }}-
+```
+
+Partitioned suites (`MIX_TEST_PARTITION`) write one history file per
+partition, so the files never collide — to report across all
+partitions, restore each partition's cache into `.temper/` (one
+`actions/cache` step per partition, or pull the caches locally) and
+run `mix temper.report`; it reads every `history-*.jsonl` it finds.
 
 `mix temper.report` always exits 0 — it informs, it does not gate CI.
 
