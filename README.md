@@ -21,9 +21,6 @@ dependencies beyond [Jason](https://hex.pm/packages/jason).
 
 ## Quickstart
 
-> ⚠️ Temper is under active development and not yet published to hex.
-> The instructions below describe the upcoming v0.1 release.
-
 ```elixir
 # mix.exs
 def deps do
@@ -38,8 +35,9 @@ end
 ExUnit.start(formatters: [ExUnit.CLIFormatter, Temper.Formatter])
 ```
 
-Run your tests as usual — Temper appends each outcome to
-`.temper/history-*.jsonl`. Then ask for the report:
+Add `.temper/` to your `.gitignore`. Run your tests as usual — Temper
+appends each outcome to `.temper/history-*.jsonl`. Once history
+accumulates, ask for the report:
 
 ```
 $ mix temper.report
@@ -51,12 +49,94 @@ Flaky tests (divergent outcomes on same git SHA):
     failing seeds: 493821, 110394
 ```
 
+`mix temper.report --json` emits the same data as a machine-readable
+payload; `mix temper.clean` deletes the recorded history (useful after
+a refactor that makes old evidence meaningless).
+
+## How detection works
+
+A test is **flaky** when it both passed and failed on the *same clean
+git SHA* — the code did not change, the outcome did. Divergence that
+only shows up in dirty-working-tree runs is reported separately as a
+**suspect**: uncommitted changes could explain it, so confidence is
+lower.
+
+What deliberately does *not* count: a test that fails on one commit
+and passes on the next (that's a fix, not a flake), runs outside a git
+repository, and skipped/excluded tests. Temper optimizes for zero
+false positives — a report you can trust over one that cries wolf.
+
+`--min-runs N` (default 2) raises the number of recorded runs a SHA
+needs before its divergence counts, trading detection speed for
+confidence. The report always shows run counts so you can judge the
+evidence yourself.
+
+## Recording in CI
+
+Temper detects CI (GitHub Actions, GitLab CI, CircleCI) and records
+the provider, run id, and the commit under test automatically. Since
+each CI job starts fresh, persist `.temper/` across runs to accumulate
+history — for GitHub Actions:
+
+```yaml
+- name: Restore test history
+  uses: actions/cache@v4
+  with:
+    path: .temper
+    key: temper-${{ github.ref_name }}-${{ github.run_id }}
+    restore-keys: |
+      temper-${{ github.ref_name }}-
+      temper-
+```
+
+The `run_id`-suffixed key makes every run save a fresh cache entry
+while restoring the most recent previous one.
+
+**Parallel test jobs** need one cache lineage per partition — cache
+keys are immutable, so parallel jobs saving the same key would keep
+only the first job's history. Add the partition to the key:
+
+```yaml
+    key: temper-${{ github.ref_name }}-${{ matrix.partition }}-${{ github.run_id }}
+    restore-keys: |
+      temper-${{ github.ref_name }}-${{ matrix.partition }}-
+```
+
+Partitioned suites (`MIX_TEST_PARTITION`) write one history file per
+partition, so the files never collide — to report across all
+partitions, restore each partition's cache into `.temper/` (one
+`actions/cache` step per partition, or pull the caches locally) and
+run `mix temper.report`; it reads every `history-*.jsonl` it finds.
+
+`mix temper.report` always exits 0 — it informs, it does not gate CI.
+
+## Configuration
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `config :temper, history_path: "..."` | `.temper/history-{partition}.jsonl` | where history is written and read |
+| `--history GLOB` (report/clean) | the setting above | one-off override |
+| `--min-runs N` (report) | `2` | evidence threshold per SHA |
+| `--json` (report) | off | machine-readable output |
+
 ## What v0.1 does — and doesn't
 
 - **Does:** record outcomes, detect same-SHA divergence, report with
   run counts, flake rates and failing seeds.
 - **Doesn't:** retry, quarantine, or block CI. Detection first; trust
   before automation.
+
+If Temper itself ever hits an error, it warns once and goes inert for
+the rest of the run — it will never break your test suite.
+
+## Status & feedback
+
+Temper is young (v0.1.x) and the history schema, report format and
+flags may still change before 1.0. It is in real use, but if anything
+surprises you — a test wrongly flagged, one that should have been, a
+crash, a confusing report — please
+[open an issue](https://github.com/volcov/temper/issues). Early
+feedback is what shapes what gets built next.
 
 ## License
 
