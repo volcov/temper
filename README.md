@@ -14,6 +14,11 @@ Temper's job is to make the message visible: which tests flake, how
 often, and under which seeds, so you can fix the brittleness instead of
 ignoring it.
 
+## Requirements
+
+Elixir 1.15+ on OTP 25+ (CI covers 1.15 through 1.20). No runtime
+dependencies beyond [Jason](https://hex.pm/packages/jason).
+
 ## Quickstart
 
 > ⚠️ Temper is under active development and not yet published to hex.
