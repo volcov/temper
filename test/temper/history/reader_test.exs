@@ -41,7 +41,29 @@ defmodule Temper.History.ReaderTest do
     test "returns an empty result for a glob matching no files" do
       result = Reader.read(Path.join(@fixtures, "does-not-exist-*.jsonl"))
 
-      assert result == %{records: [], files: [], corrupt: 0, skipped: 0}
+      assert result == %{records: [], files: [], corrupt: 0, skipped: 0, unreadable: []}
+    end
+  end
+
+  describe "read/1 with unreadable matches" do
+    test "a directory caught by the glob is reported, not raised on" do
+      dir =
+        Path.join(System.tmp_dir!(), "temper_reader_test_#{System.unique_integer([:positive])}")
+
+      history_dir = Path.join(dir, "history-1.jsonl")
+      File.mkdir_p!(history_dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      good_line =
+        File.read!(Path.join(@fixtures, "partitioned/history-0.jsonl"))
+
+      File.write!(Path.join(dir, "history-0.jsonl"), good_line)
+
+      result = Reader.read(Path.join(dir, "history-*.jsonl"))
+
+      assert length(result.records) == 2
+      assert result.files == [Path.join(dir, "history-0.jsonl")]
+      assert result.unreadable == [history_dir]
     end
   end
 end
