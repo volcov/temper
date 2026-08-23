@@ -1,0 +1,2 @@
+{"schema":1,"kind":"test","run_id":"p0run1","at":"2026-08-20T10:00:00Z","elixir":"1.20.2","otp":"27","module":"DemoTest","name":"test flaky","status":"passed","sha":"aaa1111","dirty":false,"seed":101,"partition":"0"}
+{"schema":1,"kind":"test","run_id":"p0run2","at":"2026-08-20T11:00:00Z","elixir":"1.20.2","otp":"27","module":"DemoTest","name":"test flaky","status":"passed","sha":"aaa1111","dirty":false,"seed":102,"partition":"0"}
