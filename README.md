@@ -110,6 +110,28 @@ run `mix temper.report`; it reads every `history-*.jsonl` it finds.
 
 `mix temper.report` always exits 0 — it informs, it does not gate CI.
 
+## Containers and environments without git
+
+Detection needs a commit SHA on every record — without one, runs can
+never be classified. If your tests run where git can't answer (a
+container without the `.git` directory, a sandboxed build), pass the
+context in from outside with the `TEMPER_*` variables:
+
+```
+docker run \
+  -e TEMPER_SHA="$(git rev-parse HEAD)" \
+  -e TEMPER_DIRTY="$([ -n "$(git status --porcelain)" ] && echo true || echo false)" \
+  -e TEMPER_BRANCH="$(git branch --show-current)" \
+  ... mix test
+```
+
+A non-empty `TEMPER_SHA` switches git context to manual mode: it takes
+priority over CI variables and local git. `TEMPER_DIRTY` accepts
+`true`/`1`/`yes` (default `false` — only claim clean when the tree
+really is); `TEMPER_BRANCH` is optional. You can spot the problem in a
+report footer that never flags anything: check a history line for
+`"sha":null`.
+
 ## Configuration
 
 | Setting | Default | Purpose |
