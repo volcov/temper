@@ -27,6 +27,12 @@ defmodule Temper.History.Reader do
         }
 
   @doc """
+  The default glob covering every partition's history file.
+  """
+  @spec default_glob() :: Path.t()
+  def default_glob, do: @default_glob
+
+  @doc """
   Reads every history file matching `glob` into records.
 
   Defaults to `#{inspect(@default_glob)}`. Files are read in sorted
