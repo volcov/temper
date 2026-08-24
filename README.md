@@ -25,7 +25,7 @@ dependencies beyond [Jason](https://hex.pm/packages/jason).
 # mix.exs
 def deps do
   [
-    {:temper, "~> 0.1", only: [:dev, :test], runtime: false}
+    {:temper, "~> 0.2", only: [:dev, :test], runtime: false}
   ]
 end
 ```
@@ -120,7 +120,7 @@ Three lines cover the whole umbrella — no per-app edits:
 
 ```elixir
 # mix.exs (umbrella root)
-{:temper, "~> 0.1", only: [:dev, :test], runtime: false}
+{:temper, "~> 0.2", only: [:dev, :test], runtime: false}
 
 # config/test.exs — registers the formatter for every child app;
 # ExUnit.start/1 reads persisted :ex_unit config, so test_helper.exs
