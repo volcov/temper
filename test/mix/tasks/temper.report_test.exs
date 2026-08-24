@@ -75,6 +75,37 @@ defmodule Mix.Tasks.Temper.ReportTest do
     end
   end
 
+  describe "--by-app report" do
+    test "groups findings by umbrella child app with counts and files" do
+      output = run_report(["--history", fixture("umbrella.jsonl"), "--by-app"])
+
+      assert output =~ "accounts — 2 flaky across 2 files"
+      assert output =~ "billing — 1 flaky across 1 files"
+
+      # The accounts group (more findings) comes first, with its
+      # findings indented beneath the heading.
+      assert [_before, accounts_section] = String.split(output, "accounts — 2 flaky", parts: 2)
+      [accounts_body, _rest] = String.split(accounts_section, "billing —", parts: 2)
+      assert accounts_body =~ "    Accounts.UserTest test concurrent update"
+      assert accounts_body =~ "    Accounts.RoleTest test race"
+      refute accounts_body =~ "Billing.InvoiceTest"
+    end
+
+    test "findings without an apps/ path segment group under (root)" do
+      output = run_report(["--history", fixture("clean_flake.jsonl"), "--by-app"])
+
+      assert output =~ "(root) — 1 flaky across 1 files"
+      assert output =~ "    DemoTest test flaky"
+    end
+
+    test "without the flag the report stays flat" do
+      output = run_report(["--history", fixture("umbrella.jsonl")])
+
+      refute output =~ "across"
+      assert output =~ "  Accounts.UserTest test concurrent update"
+    end
+  end
+
   describe "--json report" do
     test "emits the machine-readable payload" do
       output = run_report(["--history", fixture("clean_flake.jsonl"), "--json"])
@@ -91,6 +122,22 @@ defmodule Mix.Tasks.Temper.ReportTest do
       assert finding["flake_rate"] == 0.5
       assert finding["failing_seeds"] == [103, 104]
       assert [%{"sha" => "aaa1111"}] = finding["evidence"]
+
+      # No apps/ segment in this fixture's paths.
+      assert finding["app"] == nil
+    end
+
+    test "findings carry the derived umbrella app" do
+      output = run_report(["--history", fixture("umbrella.jsonl"), "--json"])
+
+      apps =
+        output
+        |> Jason.decode!()
+        |> Map.fetch!("flaky")
+        |> Enum.map(& &1["app"])
+        |> Enum.sort()
+
+      assert apps == ["accounts", "accounts", "billing"]
     end
   end
 end
