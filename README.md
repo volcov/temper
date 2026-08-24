@@ -184,7 +184,7 @@ report footer that never flags anything: check a history line for
 | `--min-runs N` (report) | `2` | evidence threshold per SHA |
 | `--json` (report) | off | machine-readable output |
 
-## What v0.1 does — and doesn't
+## What Temper does — and doesn't
 
 - **Does:** record outcomes, detect same-SHA divergence, report with
   run counts, flake rates and failing seeds.
@@ -196,7 +196,7 @@ the rest of the run — it will never break your test suite.
 
 ## Status & feedback
 
-Temper is young (v0.1.x) and the history schema, report format and
+Temper is young (pre-1.0) and the history schema, report format and
 flags may still change before 1.0. It is in real use, but if anything
 surprises you — a test wrongly flagged, one that should have been, a
 crash, a confusing report — please
