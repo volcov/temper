@@ -24,9 +24,18 @@ defmodule Temper.Report do
 
   Flaky tests come first (sorted by the analysis), then suspects.
   With no history files at all, prints setup instructions instead.
+
+  Options:
+
+    * `:by_app` — group findings by umbrella child app, derived from
+      each finding's file path (the segment after `apps/`). Findings
+      whose path carries no `apps/<name>/` segment group under
+      `"(root)"`. Default `false`.
   """
-  @spec human(Analysis.report(), stats()) :: String.t()
-  def human(_analysis, %{files: 0} = stats) do
+  @spec human(Analysis.report(), stats(), keyword()) :: String.t()
+  def human(analysis, stats, opts \\ [])
+
+  def human(_analysis, %{files: 0} = stats, _opts) do
     """
     No history files found matching #{stats.source}.
 
@@ -37,16 +46,25 @@ defmodule Temper.Report do
     """
   end
 
-  def human(%{flaky: [], suspects: []}, stats) do
+  def human(%{flaky: [], suspects: []}, stats, _opts) do
     "No flaky tests detected.\n\n" <> footer(stats)
   end
 
-  def human(analysis, stats) do
+  def human(analysis, stats, opts) do
+    by_app = Keyword.get(opts, :by_app, false)
+
     [
-      section("Flaky tests (divergent outcomes on same git SHA):", analysis.flaky),
+      section(
+        "Flaky tests (divergent outcomes on same git SHA):",
+        analysis.flaky,
+        "flaky",
+        by_app
+      ),
       section(
         "Suspects (divergence involving dirty-tree runs — lower confidence):",
-        analysis.suspects
+        analysis.suspects,
+        "suspect",
+        by_app
       ),
       footer(stats)
     ]
@@ -56,6 +74,9 @@ defmodule Temper.Report do
 
   @doc """
   Renders the report as a JSON payload (single line).
+
+  Every finding carries a derived `"app"` field: the umbrella child
+  app parsed from its file path, or `null` when there is none.
   """
   @spec json(Analysis.report(), stats()) :: String.t()
   def json(analysis, stats) do
@@ -63,16 +84,55 @@ defmodule Temper.Report do
       schema: 1,
       kind: "report",
       stats: stats,
-      flaky: analysis.flaky,
-      suspects: analysis.suspects
+      flaky: Enum.map(analysis.flaky, &put_app/1),
+      suspects: Enum.map(analysis.suspects, &put_app/1)
     })
   end
 
-  defp section(_title, []), do: nil
+  defp put_app(finding), do: Map.put(finding, :app, derive_app(finding.file))
 
-  defp section(title, findings) do
+  defp section(_title, [], _label, _by_app), do: nil
+
+  defp section(title, findings, _label, false) do
     blocks = Enum.map_join(findings, "\n\n", &finding_block/1)
     "#{title}\n\n#{blocks}\n"
+  end
+
+  defp section(title, findings, label, true) do
+    blocks =
+      findings
+      |> Enum.group_by(fn finding -> derive_app(finding.file) || "(root)" end)
+      |> Enum.sort_by(fn {app, group} -> {-length(group), app} end)
+      |> Enum.map_join("\n\n", fn {app, group} -> app_block(app, group, label) end)
+
+    "#{title}\n\n#{blocks}\n"
+  end
+
+  defp app_block(app, findings, label) do
+    heading = "  #{app} — #{length(findings)} #{label} across #{file_count(findings)} files"
+    body = Enum.map_join(findings, "\n\n", fn finding -> indent(finding_block(finding)) end)
+
+    heading <> "\n\n" <> body
+  end
+
+  defp file_count(findings) do
+    findings |> Enum.map(& &1.file) |> Enum.reject(&is_nil/1) |> Enum.uniq() |> length()
+  end
+
+  defp indent(block) do
+    block |> String.split("\n") |> Enum.map_join("\n", fn line -> "  " <> line end)
+  end
+
+  # The umbrella child app owning a file: the path segment after "apps".
+  defp derive_app(nil), do: nil
+
+  defp derive_app(file) do
+    segments = Path.split(file)
+
+    case Enum.find_index(segments, fn segment -> segment == "apps" end) do
+      nil -> nil
+      index -> Enum.at(segments, index + 1)
+    end
   end
 
   defp finding_block(finding) do

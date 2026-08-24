@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mix temper.report --by-app` groups findings by umbrella child app
+  (derived from file paths), with per-app counts and involved files.
+  JSON findings always carry the derived `"app"` field.
+
 - `TEMPER_SHA`, `TEMPER_DIRTY` and `TEMPER_BRANCH` environment
   variables override git context detection — for containers and other
   environments where git cannot answer. A non-empty `TEMPER_SHA`

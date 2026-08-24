@@ -14,7 +14,10 @@ defmodule Mix.Tasks.Temper.Report do
 
   ## Options
 
-    * `--json` — print a machine-readable JSON payload instead
+    * `--json` — print a machine-readable JSON payload instead (every
+      finding carries a derived `"app"` field)
+    * `--by-app` — group findings by umbrella child app (derived from
+      file paths), with per-app counts and involved files
     * `--min-runs N` — minimum runs on a SHA for its divergence to
       count as evidence (default: 2)
     * `--history GLOB` — read this path or glob instead of the default
@@ -28,7 +31,7 @@ defmodule Mix.Tasks.Temper.Report do
   alias Temper.History.Reader
   alias Temper.Report
 
-  @switches [json: :boolean, min_runs: :integer, history: :string]
+  @switches [json: :boolean, by_app: :boolean, min_runs: :integer, history: :string]
 
   @impl Mix.Task
   def run(argv) do
@@ -48,7 +51,12 @@ defmodule Mix.Tasks.Temper.Report do
       skipped: result.skipped
     }
 
-    output = if opts[:json], do: Report.json(analysis, stats), else: Report.human(analysis, stats)
+    output =
+      if opts[:json] do
+        Report.json(analysis, stats)
+      else
+        Report.human(analysis, stats, by_app: opts[:by_app] || false)
+      end
 
     Mix.shell().info(output)
   end
