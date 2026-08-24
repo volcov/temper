@@ -153,6 +153,14 @@ each write their own file, exactly like the default layout — when
 reporting across partitions, pass the glob from the umbrella root:
 `mix temper.report --history ".temper/history-*.jsonl"`.
 
+**Run tests from the umbrella root.** With the root-only dependency,
+a suite started from *inside* a child directory (`cd apps/foo &&
+mix test`) cannot load the formatter — the run succeeds but records
+**nothing, silently**. Running from the root always records, including
+targeted runs: `mix test apps/foo/test` works. If your team habitually
+runs tests from child directories, use the per-app fallback
+(declare the dependency in each child's `mix.exs`) instead.
+
 ## Containers and environments without git
 
 Detection needs a commit SHA on every record — without one, runs can
