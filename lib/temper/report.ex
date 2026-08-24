@@ -123,16 +123,20 @@ defmodule Temper.Report do
     block |> String.split("\n") |> Enum.map_join("\n", fn line -> "  " <> line end)
   end
 
-  # The umbrella child app owning a file: the path segment after "apps".
+  # The umbrella child app owning a file: the segment after the LAST
+  # "apps" — a checkout under e.g. /home/ci/apps/project must not win
+  # over the umbrella's own apps/ directory.
   defp derive_app(nil), do: nil
 
   defp derive_app(file) do
     segments = Path.split(file)
 
-    case Enum.find_index(segments, fn segment -> segment == "apps" end) do
-      nil -> nil
-      index -> Enum.at(segments, index + 1)
-    end
+    segments
+    |> Enum.with_index()
+    |> Enum.reduce(nil, fn
+      {"apps", index}, _closer_match -> Enum.at(segments, index + 1)
+      {_segment, _index}, closest -> closest
+    end)
   end
 
   defp finding_block(finding) do
