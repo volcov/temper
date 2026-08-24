@@ -7,17 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [0.2.0] - 2026-08-23
 
-- `mix temper.report --by-app` groups findings by umbrella child app
-  (derived from file paths), with per-app counts and involved files.
-  JSON findings always carry the derived `"app"` field.
+### Added
 
 - `TEMPER_SHA`, `TEMPER_DIRTY` and `TEMPER_BRANCH` environment
   variables override git context detection — for containers and other
   environments where git cannot answer. A non-empty `TEMPER_SHA`
   activates manual mode and takes priority over CI variables and
   local git.
+- `mix temper.report --by-app` groups findings by umbrella child app
+  (derived from file paths), with per-app counts and involved files.
+  JSON findings always carry the derived `"app"` field.
+
+### Changed
+
+- Recommended dependency line is now
+  `only: [:dev, :test], runtime: false`, keeping `mix temper.report`
+  available in the default env.
+- Documented umbrella setup: root-only dependency, formatter
+  registration via `config :ex_unit`, and a partition-safe shared
+  history path — verified end-to-end on Elixir 1.15 through 1.20.
 
 ## [0.1.0] - 2026-08-22
 
