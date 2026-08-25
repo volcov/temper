@@ -131,14 +131,10 @@ config :ex_unit, formatters: [ExUnit.CLIFormatter, Temper.Formatter]
 # config/config.exs — NOT test.exs: mix temper.report runs in the dev
 # env and must resolve the same path the test-env formatter writes to.
 # Child apps run tests with their own directory as cwd, so pin the
-# history at the umbrella root — keeping one file per partition, since
-# concurrent partitioned jobs must never share a file.
+# history at the umbrella root. {partition} keeps one file per
+# partition, since concurrent partitioned jobs must never share a file.
 config :temper,
-  history_path:
-    Path.expand(
-      "../.temper/history-#{System.get_env("MIX_TEST_PARTITION") || "0"}.jsonl",
-      __DIR__
-    )
+  history_path: Path.expand("../.temper/history-{partition}.jsonl", __DIR__)
 ```
 
 The root-only dependency works because umbrella apps share one
@@ -149,9 +145,9 @@ dependency in each child app instead — everything else stays the same.
 
 Within one `mix test` invocation the child suites run sequentially in
 a single VM, so sharing a partition's file is safe. Partitioned jobs
-each write their own file, exactly like the default layout — when
-reporting across partitions, pass the glob from the umbrella root:
-`mix temper.report --history ".temper/history-*.jsonl"`.
+each write their own file, exactly like the default layout — and
+`mix temper.report` widens `{partition}` to `*`, reading every
+partition's file with no extra flags.
 
 **Run tests from the umbrella root.** With the root-only dependency,
 a suite started from *inside* a child directory (`cd apps/foo &&
@@ -187,7 +183,7 @@ report footer that never flags anything: check a history line for
 
 | Setting | Default | Purpose |
 |---|---|---|
-| `config :temper, history_path: "..."` | `.temper/history-{partition}.jsonl` | where history is written and read — set it in `config/config.exs`, not `test.exs`, so the dev-env `mix temper.report` sees it too |
+| `config :temper, history_path: "..."` | `.temper/history-{partition}.jsonl` | where history is written and read — set it in `config/config.exs`, not `test.exs`, so the dev-env `mix temper.report` sees it too. A literal `{partition}` expands to `MIX_TEST_PARTITION` when writing (`"0"` when unset) and widens to `*` when reading, keeping custom paths partition-safe |
 | `--history GLOB` (report/clean) | the setting above | one-off override |
 | `--min-runs N` (report) | `2` | evidence threshold per SHA |
 | `--json` (report) | off | machine-readable output |

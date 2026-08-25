@@ -14,7 +14,12 @@ defmodule Temper.Formatter do
   The history path defaults to `.temper/history-{partition}.jsonl` and
   can be overridden with the `:history_path` application env:
 
-      config :temper, history_path: "custom/path.jsonl"
+      config :temper, history_path: "custom/history-{partition}.jsonl"
+
+  A literal `{partition}` in the configured path expands to the current
+  `MIX_TEST_PARTITION` value (`"0"` when unset), keeping custom paths
+  partition-safe the same way the default is. Without the placeholder,
+  concurrent partitioned runs would all write to the same file.
 
   Temper must never break a test run: every event handler is guarded —
   on any error the formatter logs a single warning and goes inert for
@@ -24,6 +29,7 @@ defmodule Temper.Formatter do
   use GenServer
 
   alias Temper.Env
+  alias Temper.History.Template
   alias Temper.History.Writer
   alias Temper.Record
   alias Temper.RunContext
@@ -61,7 +67,12 @@ defmodule Temper.Formatter do
   defp start_run(state) do
     env = Env.gather()
     context = env |> Map.put(:seed, state.seed) |> RunContext.new()
-    path = Application.get_env(:temper, :history_path) || Writer.default_path(env.partition)
+
+    path =
+      case Application.get_env(:temper, :history_path) do
+        nil -> Writer.default_path(env.partition)
+        configured -> Template.expand(configured, env.partition)
+      end
 
     case Writer.open(path) do
       {:ok, writer} ->

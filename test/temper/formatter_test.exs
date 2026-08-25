@@ -140,6 +140,55 @@ defmodule Temper.FormatterTest do
     end
   end
 
+  describe "a {partition} placeholder in the configured path" do
+    setup %{history_path: history_path} do
+      previous = System.get_env("MIX_TEST_PARTITION")
+
+      on_exit(fn ->
+        case previous do
+          nil -> System.delete_env("MIX_TEST_PARTITION")
+          value -> System.put_env("MIX_TEST_PARTITION", value)
+        end
+      end)
+
+      dir = Path.dirname(history_path)
+      Application.put_env(:temper, :history_path, Path.join(dir, "history-{partition}.jsonl"))
+
+      {:ok, dir: dir}
+    end
+
+    test "expands to the MIX_TEST_PARTITION value", %{dir: dir} do
+      System.put_env("MIX_TEST_PARTITION", "7")
+
+      {:ok, state} = Formatter.init(seed: 1)
+
+      run_events(state, [
+        {:suite_started, []},
+        {:test_finished, build_test()},
+        {:suite_finished, %{run: 1, async: nil, load: nil}}
+      ])
+
+      assert [{:ok, record}, {:error, {:unsupported_kind, "suite"}}] =
+               decoded_lines(Path.join(dir, "history-7.jsonl"))
+
+      assert record.context.partition == "7"
+    end
+
+    test "expands to 0 when MIX_TEST_PARTITION is unset", %{dir: dir} do
+      System.delete_env("MIX_TEST_PARTITION")
+
+      {:ok, state} = Formatter.init(seed: 1)
+
+      run_events(state, [
+        {:suite_started, []},
+        {:test_finished, build_test()},
+        {:suite_finished, %{run: 1, async: nil, load: nil}}
+      ])
+
+      assert [{:ok, _record}, _suite] = decoded_lines(Path.join(dir, "history-0.jsonl"))
+    end
+  end
+
   describe "crash safety (D4)" do
     test "an unwritable history path warns once and the run continues" do
       Application.put_env(:temper, :history_path, "/dev/null/not/a/dir/history.jsonl")

@@ -68,6 +68,13 @@ defmodule Mix.Tasks.Temper.ReportTest do
       assert output =~ "Read 3 test outcomes from 2 history files."
     end
 
+    test "a {partition} placeholder widens to every partition's file" do
+      output = run_report(["--history", fixture("partitioned/history-{partition}.jsonl")])
+
+      assert output =~ "DemoTest test flaky"
+      assert output =~ "Read 3 test outcomes from 2 history files."
+    end
+
     test "--min-runs raises the evidence threshold" do
       output = run_report(["--history", fixture("clean_flake.jsonl"), "--min-runs", "5"])
 

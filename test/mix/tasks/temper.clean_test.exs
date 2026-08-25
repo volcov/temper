@@ -37,6 +37,17 @@ defmodule Mix.Tasks.Temper.CleanTest do
     assert File.read!(unrelated) == "kept"
   end
 
+  test "a {partition} placeholder deletes every partition's file", %{dir: dir} do
+    for partition <- 0..2 do
+      File.write!(Path.join(dir, "history-#{partition}.jsonl"), "{}\n")
+    end
+
+    output = run_clean(["--history", Path.join(dir, "history-{partition}.jsonl")])
+
+    assert output == "Deleted 3 history files."
+    assert File.ls!(dir) == []
+  end
+
   test "skips directories caught by the glob instead of aborting", %{dir: dir} do
     File.write!(Path.join(dir, "history-0.jsonl"), "{}\n")
     trap = Path.join(dir, "history-1.jsonl")
