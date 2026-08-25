@@ -189,7 +189,8 @@ defmodule Temper.Doctor do
       run_recorded?(runs) ->
         ok(
           "formatter registration",
-          "confirmed by recorded history — the latest test run recorded outcomes"
+          "confirmed by recorded history — the latest test-run manifest and " <>
+            "the newest history write coincide"
         )
 
       true ->
@@ -204,9 +205,21 @@ defmodule Temper.Doctor do
     end
   end
 
-  # Both files are written at the end of the same `mix test` run, so a
-  # recording run leaves them within moments of each other; the slack
-  # absorbs that ordering, filesystem timestamp granularity included.
+  # Both files are written at the end of the same `mix test` run — the
+  # history closes at :suite_finished, the manifest after ExUnit.run
+  # returns — so a recording run leaves the manifest 0 to a few
+  # seconds younger than the history: sibling formatters (a JUnit
+  # reporter on a large suite) run their own :suite_finished in
+  # between. The slack absorbs that gap, filesystem timestamp
+  # granularity included.
+  #
+  # Known, accepted blind spot: a run whose registration was removed
+  # and that COMPLETES within the slack of the previous history write
+  # is indistinguishable from a recording run — both leave the same
+  # timestamp signature. Shrinking the slack cannot separate them; it
+  # only converts that contrived false pass into a plausible false
+  # "recorded nothing" failure on healthy suites with slow sibling
+  # formatters, which would be the worse error for a gating check.
   @run_slack_seconds 5
 
   defp run_without_recording?(%{last_test_run: run, last_recorded: recorded}) do

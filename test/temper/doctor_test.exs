@@ -72,7 +72,7 @@ defmodule Temper.DoctorTest do
         Doctor.evaluate(facts(config: %{status: :missing, formatters: nil, history_path: nil}))
 
       assert %{status: :ok, detail: detail} = check(checks, "formatter registration")
-      assert detail =~ "the latest test run recorded outcomes"
+      assert detail =~ "manifest and the newest history write coincide"
     end
 
     test "a test run newer than the history fails — even with stale mentions" do
