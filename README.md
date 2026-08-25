@@ -99,7 +99,8 @@ committed SHAs reports as flaky with full confidence.
 **Why does the report say nothing after one run?** One observation
 per test can never diverge — the earliest a flake can surface is the
 second run on the same SHA. Keep running your tests; the evidence
-builds itself.
+builds itself. Still nothing after several runs? `mix temper.doctor`
+checks the setup for the failure modes that stay silent.
 
 ## Recording in CI
 
@@ -178,8 +179,9 @@ partition's file with no extra flags.
 **Run tests from the umbrella root.** With the root-only dependency,
 a suite started from *inside* a child directory (`cd apps/foo &&
 mix test`) cannot load the formatter — the run succeeds but records
-**nothing, silently**. Running from the root always records, including
-targeted runs: `mix test apps/foo/test` works. If your team habitually
+**nothing, silently** (`mix temper.doctor` warns about exactly this).
+Running from the root always records, including targeted runs:
+`mix test apps/foo/test` works. If your team habitually
 runs tests from child directories, use the per-app fallback
 (declare the dependency in each child's `mix.exs`) instead.
 
@@ -205,12 +207,35 @@ really is); `TEMPER_BRANCH` is optional. You can spot the problem in a
 report footer that never flags anything: check a history line for
 `"sha":null`.
 
+## Troubleshooting: mix temper.doctor
+
+When the report stays empty and you suspect the setup rather than
+your tests, run the preflight:
+
+```
+$ mix temper.doctor
+  ✓ formatter registration — registered via config :ex_unit for the test env
+  ✓ history_path — using the default .temper/history-{partition}.jsonl in every env
+  ✓ recorded history — 132 test records in 2 files, last recorded at 2026-08-24T13:59:01Z
+  ✓ recorded commit SHAs — all 132 records carry a commit SHA
+
+All 4 checks passed.
+```
+
+It diagnoses the failure modes that are otherwise silent: a formatter
+that never registered, a `history_path` set only for the test env
+(invisible to the dev-env report task), umbrella child apps whose
+app-dir runs cannot load the formatter, suites that recorded nothing,
+and records without a usable commit SHA. The task exits non-zero when
+a check finds a problem — warnings don't fail — so CI can gate setup
+on it.
+
 ## Configuration
 
 | Setting | Default | Purpose |
 |---|---|---|
 | `config :temper, history_path: "..."` | `.temper/history-{partition}.jsonl` | where history is written and read — set it in `config/config.exs`, not `test.exs`, so the dev-env `mix temper.report` sees it too. A literal `{partition}` expands to `MIX_TEST_PARTITION` when writing (`"0"` when unset) and widens to `*` when reading, keeping custom paths partition-safe |
-| `--history GLOB` (report/clean) | the setting above | one-off override |
+| `--history GLOB` (report/clean/doctor) | the setting above | one-off override |
 | `--min-runs N` (report) | `2` | evidence threshold per SHA |
 | `--json` (report) | off | machine-readable output |
 

@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - README FAQ answering the first real-world questions: whether Temper
   re-runs tests, cross-commit failures, what "Suspects" means, and
   why a first run reports nothing.
+- `mix temper.doctor` — setup preflight diagnosing the silent failure
+  modes: formatter not registered for the test env, `history_path`
+  invisible outside the test env, umbrella child apps whose app-dir
+  runs record nothing, empty history, and records without a usable
+  commit SHA. Exits non-zero on problems so CI can gate setup on it.
 
 ## [0.2.0] - 2026-08-23
 
