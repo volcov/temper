@@ -8,8 +8,8 @@ defmodule Mix.Tasks.Temper.Doctor do
 
   Runs the checks that catch the mistakes which fail silently:
 
-    * is `Temper.Formatter` registered for the test env (via
-      `config :ex_unit` or a `test_helper.exs`)?
+    * is `Temper.Formatter` registered for the test env — proven by
+      the evaluated `config :ex_unit` value or by recorded history?
     * is `config :temper, history_path` visible outside the test env,
       so `mix temper.report` reads where the formatter writes?
     * do umbrella child apps declare `:temper`, or will app-dir test

@@ -7,9 +7,16 @@ defmodule Temper.Doctor do
 
   `gather/2` is the boundary: it evaluates the project's config for
   the test env (via `Config.Reader` — config files are data, nothing
-  is applied), scans `test_helper.exs` and umbrella child `mix.exs`
-  files, and reads the recorded history. `evaluate/1` and `render/1`
-  are pure: facts in, checks out; checks in, report out.
+  is applied), loads each umbrella child's real dependency list, scans
+  `test_helper.exs` files for mentions, and reads the recorded
+  history. `evaluate/1` and `render/1` are pure: facts in, checks out;
+  checks in, report out.
+
+  The checks follow one evidence policy: a check passes only on
+  evaluated evidence (a computed config value, a loaded project's
+  deps) or behavioral evidence (recorded history). Source-code scans
+  cannot decide what code does at runtime, so a scan result is never
+  worth more than a warning.
   """
 
   alias Temper.History.Reader
@@ -30,7 +37,7 @@ defmodule Temper.Doctor do
             formatters: [module()] | nil,
             history_path: String.t() | nil
           },
-          helpers: %{registered: [Path.t()], mentioned: [Path.t()]},
+          helper_mentions: [Path.t()],
           umbrella: :not_umbrella | %{children: [Path.t()], without_dep: [Path.t()]},
           current_history_path: String.t() | nil,
           history: %{glob: Path.t(), result: Reader.result()}
@@ -54,7 +61,7 @@ defmodule Temper.Doctor do
 
     %{
       config: config,
-      helpers: scan_helpers(root),
+      helper_mentions: helper_mentions(root),
       umbrella: umbrella(root),
       current_history_path: current,
       history: %{glob: glob, result: Reader.read(join(root, glob))}
@@ -97,28 +104,43 @@ defmodule Temper.Doctor do
 
   ## Checks (pure)
 
+  # Evidence policy: a source-code scan can never make this check
+  # pass. `:ok` requires evaluated evidence (the Config.Reader-computed
+  # formatter list) or behavioral evidence (recorded history proves a
+  # formatter ran); the test_helper.exs mention scan only picks the
+  # warn or fail wording. Static analysis cannot decide what
+  # ExUnit.start receives at runtime, so it is never trusted to.
   defp registration_check(facts) do
     formatters = facts.config.formatters || []
+    mentions = facts.helper_mentions
+    recorded? = facts.history.result.records != []
 
     cond do
       Temper.Formatter in formatters ->
         ok("formatter registration", "registered via config :ex_unit for the test env")
 
-      facts.helpers.registered != [] ->
+      recorded? and mentions != [] ->
         ok(
           "formatter registration",
-          "registered in #{Enum.join(facts.helpers.registered, ", ")}"
+          "confirmed by recorded history (mentioned in #{Enum.join(mentions, ", ")})"
         )
 
-      facts.helpers.mentioned != [] ->
+      recorded? ->
         warn(
           "formatter registration",
-          "Temper.Formatter appears in #{Enum.join(facts.helpers.mentioned, ", ")} " <>
-            "but not visibly inside a formatters: list — could not confirm " <>
-            "ExUnit.start receives it",
-          "If the formatter list is built dynamically, confirm a recorded run " <>
-            "below; otherwise register it:\n" <>
-            "    ExUnit.start(formatters: [ExUnit.CLIFormatter, Temper.Formatter])"
+          "history holds records, but Temper.Formatter appears in no evaluated " <>
+            "config or test_helper.exs — was the registration removed? " <>
+            "New runs may record nothing",
+          registration_hint()
+        )
+
+      mentions != [] ->
+        warn(
+          "formatter registration",
+          "Temper.Formatter appears in #{Enum.join(mentions, ", ")}, but only a " <>
+            "recorded run proves ExUnit.start receives it",
+          "Run mix test once, then re-run mix temper.doctor — recorded history " <>
+            "is the confirmation."
         )
 
       match?({:error, _reason}, facts.config.status) ->
@@ -350,39 +372,35 @@ defmodule Temper.Doctor do
       %{status: {:error, "#{kind}: #{inspect(reason)}"}, formatters: nil, history_path: nil}
   end
 
-  defp scan_helpers(root) do
-    classified =
-      [
-        join(root, "test/test_helper.exs")
-        | Path.wildcard(join(root, "apps/*/test/test_helper.exs"))
-      ]
-      |> Enum.group_by(&classify_helper/1)
-
-    %{
-      registered: Map.get(classified, :registered, []),
-      mentioned: Map.get(classified, :mentioned, [])
-    }
+  # The mention scan walks the parsed AST, not the raw text, so
+  # comments, docstrings and string literals do not count. It makes no
+  # stronger claim than "the alias appears in active code" — per the
+  # evidence policy on registration_check/1, that can only shape a
+  # warning, never a pass. An unreadable or unparsable helper counts
+  # as no mention: a broken file fails test runs loudly on its own,
+  # which is not the silent mode this doctor hunts.
+  defp helper_mentions(root) do
+    [
+      join(root, "test/test_helper.exs")
+      | Path.wildcard(join(root, "apps/*/test/test_helper.exs"))
+    ]
+    |> Enum.filter(&mentions_formatter?/1)
   end
 
-  # :registered — the Temper.Formatter alias sits inside a
-  # `formatters:` keyword value, the canonical inline registration.
-  # :mentioned — the alias appears somewhere else (an `alias` line, a
-  # list assigned to a variable that may or may not reach
-  # ExUnit.start), which the check reports as unverifiable rather
-  # than guessing either way.
-  defp classify_helper(path) do
-    case parse(path) do
-      {:ok, ast} ->
-        cond do
-          contains?(ast, &registered_formatter?/1) -> :registered
-          contains?(ast, &formatter_alias?/1) -> :mentioned
-          true -> :absent
-        end
+  defp mentions_formatter?(path) do
+    with {:ok, content} <- File.read(path),
+         {:ok, ast} <- Code.string_to_quoted(content) do
+      {_ast, found} =
+        Macro.prewalk(ast, false, fn node, acc -> {node, acc or formatter_alias?(node)} end)
 
-      :error ->
-        :absent
+      found
+    else
+      {:error, _unreadable_or_unparsable} -> false
     end
   end
+
+  defp formatter_alias?({:__aliases__, _meta, [:Temper, :Formatter]}), do: true
+  defp formatter_alias?(_node), do: false
 
   defp umbrella(root) do
     case Path.wildcard(join(root, "apps/*/mix.exs")) do
@@ -390,55 +408,56 @@ defmodule Temper.Doctor do
         :not_umbrella
 
       children ->
+        apps = known_apps(root)
+
         %{
           children: children,
-          without_dep: Enum.reject(children, &declares_temper_dep?/1)
+          without_dep: Enum.reject(children, &declares_temper_dep?(&1, apps))
         }
     end
   end
 
-  defp declares_temper_dep?(path) do
-    case parse(path) do
-      {:ok, ast} -> contains?(ast, &temper_dep?/1)
-      :error -> false
+  # At the real umbrella root, Mix already knows the child apps — their
+  # atoms come from Mix, never minted from directory names.
+  defp known_apps(".") do
+    Mix.Project.apps_paths() || %{}
+  end
+
+  defp known_apps(_other_root), do: %{}
+
+  # Evaluated evidence, not a scan: load the child's mix.exs as a real
+  # Mix project and inspect the deps list it actually returns. Dynamic
+  # deps (`deps() ++ extra`) resolve correctly, and a `{:temper, ...}`
+  # tuple anywhere outside `deps` cannot fake a declaration. A child
+  # whose project cannot be loaded or named counts as not declaring —
+  # per the evidence policy that can only strengthen the warning, and
+  # a genuinely broken child fails its own test runs loudly anyway.
+  defp declares_temper_dep?(mix_exs, apps) do
+    dir = Path.dirname(mix_exs)
+    app = child_app(dir, apps)
+
+    deps = Mix.Project.in_project(app, dir, fn _module -> Mix.Project.config()[:deps] || [] end)
+
+    Enum.any?(deps, &(dep_name(&1) == :temper))
+  rescue
+    _exception -> false
+  catch
+    _kind, _reason -> false
+  end
+
+  defp child_app(dir, apps) do
+    expanded = Path.expand(dir)
+
+    case Enum.find(apps, fn {_app, path} -> Path.expand(path) == expanded end) do
+      {app, _path} -> app
+      # Raising on an unknown atom lands in the caller's rescue.
+      nil -> dir |> Path.basename() |> String.to_existing_atom()
     end
   end
 
-  # The scans walk the parsed AST, not the raw text, so comments,
-  # docstrings and string literals cannot fake a registration or a
-  # dependency. A file that cannot be read or parsed counts as not
-  # containing the node — a broken file fails test runs loudly on its
-  # own, which is not the silent mode this doctor hunts.
-  defp parse(path) do
-    with {:ok, content} <- File.read(path),
-         {:ok, ast} <- Code.string_to_quoted(content) do
-      {:ok, ast}
-    else
-      {:error, _unreadable_or_unparsable} -> :error
-    end
-  end
-
-  defp contains?(ast, node?) do
-    {_ast, found} =
-      Macro.prewalk(ast, false, fn node, acc -> {node, acc or node?.(node)} end)
-
-    found
-  end
-
-  defp registered_formatter?({:formatters, value}), do: contains?(value, &formatter_alias?/1)
-  defp registered_formatter?(_node), do: false
-
-  defp formatter_alias?({:__aliases__, _meta, [:Temper, :Formatter]}), do: true
-  defp formatter_alias?(_node), do: false
-
-  # Dependency-tuple shapes only: `{:temper, "~> 0.2"}` and
-  # `{:temper, in_umbrella: true}` are literal 2-tuples in the AST,
-  # `{:temper, "~> 0.2", only: [:dev, :test], runtime: false}` is a
-  # `:{}` node. A bare `:temper` atom (plt_add_apps, an app named
-  # :temper_web) never counts.
-  defp temper_dep?({:temper, _requirement_or_opts}), do: true
-  defp temper_dep?({:{}, _meta, [:temper | _rest]}), do: true
-  defp temper_dep?(_node), do: false
+  defp dep_name(dep) when is_atom(dep), do: dep
+  defp dep_name(dep) when is_tuple(dep) and tuple_size(dep) > 0, do: elem(dep, 0)
+  defp dep_name(_malformed), do: nil
 
   # Absolute paths (e.g. a Path.expand-ed history_path) stay as they
   # are; "." as root keeps relative output readable.

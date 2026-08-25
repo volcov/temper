@@ -82,10 +82,13 @@ defmodule Mix.Tasks.Temper.DoctorTest do
     File.mkdir_p!(Path.join(dir, "elsewhere"))
     File.write!(Path.join(dir, "elsewhere/history-0.jsonl"), history_line() <> "\n")
 
-    catch_exit(run_doctor(dir, ["--history", "elsewhere/history-{partition}.jsonl"]))
+    output = run_doctor(dir, ["--history", "elsewhere/history-{partition}.jsonl"])
 
-    assert_received {:mix_shell, :info, [output]}
     assert output =~ "✓ recorded history"
     assert output =~ "1 test records in 1 files"
+
+    # Records with no visible registration: a warning (recording may
+    # stop), not a problem — behavioral evidence keeps the exit at 0.
+    assert output =~ "! formatter registration"
   end
 end
