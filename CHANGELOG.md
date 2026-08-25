@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it with the `MIX_TEST_PARTITION` value (`"0"` when unset) and
   `mix temper.report` / `mix temper.clean` widen it to `*` — custom
   paths are partition-safe by construction instead of by recipe.
+- README FAQ answering the first real-world questions: whether Temper
+  re-runs tests, cross-commit failures, what "Suspects" means, and
+  why a first run reports nothing.
 
 ## [0.2.0] - 2026-08-23
 
