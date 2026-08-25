@@ -30,7 +30,7 @@ defmodule Temper.Doctor do
             formatters: [module()] | nil,
             history_path: String.t() | nil
           },
-          helper_registrations: [Path.t()],
+          helpers: %{registered: [Path.t()], mentioned: [Path.t()]},
           umbrella: :not_umbrella | %{children: [Path.t()], without_dep: [Path.t()]},
           current_history_path: String.t() | nil,
           history: %{glob: Path.t(), result: Reader.result()}
@@ -54,7 +54,7 @@ defmodule Temper.Doctor do
 
     %{
       config: config,
-      helper_registrations: helper_registrations(root),
+      helpers: scan_helpers(root),
       umbrella: umbrella(root),
       current_history_path: current,
       history: %{glob: glob, result: Reader.read(join(root, glob))}
@@ -104,10 +104,21 @@ defmodule Temper.Doctor do
       Temper.Formatter in formatters ->
         ok("formatter registration", "registered via config :ex_unit for the test env")
 
-      facts.helper_registrations != [] ->
+      facts.helpers.registered != [] ->
         ok(
           "formatter registration",
-          "registered in #{Enum.join(facts.helper_registrations, ", ")}"
+          "registered in #{Enum.join(facts.helpers.registered, ", ")}"
+        )
+
+      facts.helpers.mentioned != [] ->
+        warn(
+          "formatter registration",
+          "Temper.Formatter appears in #{Enum.join(facts.helpers.mentioned, ", ")} " <>
+            "but not visibly inside a formatters: list — could not confirm " <>
+            "ExUnit.start receives it",
+          "If the formatter list is built dynamically, confirm a recorded run " <>
+            "below; otherwise register it:\n" <>
+            "    ExUnit.start(formatters: [ExUnit.CLIFormatter, Temper.Formatter])"
         )
 
       match?({:error, _reason}, facts.config.status) ->
@@ -339,12 +350,38 @@ defmodule Temper.Doctor do
       %{status: {:error, "#{kind}: #{inspect(reason)}"}, formatters: nil, history_path: nil}
   end
 
-  defp helper_registrations(root) do
-    [
-      join(root, "test/test_helper.exs")
-      | Path.wildcard(join(root, "apps/*/test/test_helper.exs"))
-    ]
-    |> Enum.filter(fn path -> source_contains?(path, &formatter_alias?/1) end)
+  defp scan_helpers(root) do
+    classified =
+      [
+        join(root, "test/test_helper.exs")
+        | Path.wildcard(join(root, "apps/*/test/test_helper.exs"))
+      ]
+      |> Enum.group_by(&classify_helper/1)
+
+    %{
+      registered: Map.get(classified, :registered, []),
+      mentioned: Map.get(classified, :mentioned, [])
+    }
+  end
+
+  # :registered — the Temper.Formatter alias sits inside a
+  # `formatters:` keyword value, the canonical inline registration.
+  # :mentioned — the alias appears somewhere else (an `alias` line, a
+  # list assigned to a variable that may or may not reach
+  # ExUnit.start), which the check reports as unverifiable rather
+  # than guessing either way.
+  defp classify_helper(path) do
+    case parse(path) do
+      {:ok, ast} ->
+        cond do
+          contains?(ast, &registered_formatter?/1) -> :registered
+          contains?(ast, &formatter_alias?/1) -> :mentioned
+          true -> :absent
+        end
+
+      :error ->
+        :absent
+    end
   end
 
   defp umbrella(root) do
@@ -355,35 +392,53 @@ defmodule Temper.Doctor do
       children ->
         %{
           children: children,
-          without_dep:
-            Enum.reject(children, fn path -> source_contains?(path, &temper_atom?/1) end)
+          without_dep: Enum.reject(children, &declares_temper_dep?/1)
         }
     end
   end
 
-  # The scan is over the parsed AST, not the raw text, so comments,
+  defp declares_temper_dep?(path) do
+    case parse(path) do
+      {:ok, ast} -> contains?(ast, &temper_dep?/1)
+      :error -> false
+    end
+  end
+
+  # The scans walk the parsed AST, not the raw text, so comments,
   # docstrings and string literals cannot fake a registration or a
   # dependency. A file that cannot be read or parsed counts as not
   # containing the node — a broken file fails test runs loudly on its
   # own, which is not the silent mode this doctor hunts.
-  defp source_contains?(path, node?) do
+  defp parse(path) do
     with {:ok, content} <- File.read(path),
          {:ok, ast} <- Code.string_to_quoted(content) do
-      {_ast, found} =
-        Macro.prewalk(ast, false, fn node, acc -> {node, acc or node?.(node)} end)
-
-      found
+      {:ok, ast}
     else
-      {:error, _unreadable_or_unparsable} -> false
+      {:error, _unreadable_or_unparsable} -> :error
     end
   end
+
+  defp contains?(ast, node?) do
+    {_ast, found} =
+      Macro.prewalk(ast, false, fn node, acc -> {node, acc or node?.(node)} end)
+
+    found
+  end
+
+  defp registered_formatter?({:formatters, value}), do: contains?(value, &formatter_alias?/1)
+  defp registered_formatter?(_node), do: false
 
   defp formatter_alias?({:__aliases__, _meta, [:Temper, :Formatter]}), do: true
   defp formatter_alias?(_node), do: false
 
-  # Exact atom match: the dep tuple's :temper, never :temper_web or a
-  # "temper" string.
-  defp temper_atom?(node), do: node == :temper
+  # Dependency-tuple shapes only: `{:temper, "~> 0.2"}` and
+  # `{:temper, in_umbrella: true}` are literal 2-tuples in the AST,
+  # `{:temper, "~> 0.2", only: [:dev, :test], runtime: false}` is a
+  # `:{}` node. A bare `:temper` atom (plt_add_apps, an app named
+  # :temper_web) never counts.
+  defp temper_dep?({:temper, _requirement_or_opts}), do: true
+  defp temper_dep?({:{}, _meta, [:temper | _rest]}), do: true
+  defp temper_dep?(_node), do: false
 
   # Absolute paths (e.g. a Path.expand-ed history_path) stay as they
   # are; "." as root keeps relative output readable.

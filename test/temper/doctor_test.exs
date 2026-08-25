@@ -41,7 +41,7 @@ defmodule Temper.DoctorTest do
           formatters: [ExUnit.CLIFormatter, Temper.Formatter],
           history_path: nil
         },
-        helper_registrations: [],
+        helpers: %{registered: [], mentioned: []},
         umbrella: :not_umbrella,
         current_history_path: nil,
         history: %{glob: ".temper/history-*.jsonl", result: read_result()}
@@ -67,12 +67,28 @@ defmodule Temper.DoctorTest do
         Doctor.evaluate(
           facts(
             config: %{status: :missing, formatters: nil, history_path: nil},
-            helper_registrations: ["test/test_helper.exs"]
+            helpers: %{registered: ["test/test_helper.exs"], mentioned: []}
           )
         )
 
       assert %{status: :ok, detail: "registered in test/test_helper.exs"} =
                check(checks, "formatter registration")
+    end
+
+    test "a mention outside a formatters: list warns instead of passing" do
+      checks =
+        Doctor.evaluate(
+          facts(
+            config: %{status: :missing, formatters: nil, history_path: nil},
+            helpers: %{registered: [], mentioned: ["test/test_helper.exs"]}
+          )
+        )
+
+      assert %{status: :warn, detail: detail, hint: hint} =
+               check(checks, "formatter registration")
+
+      assert detail =~ "could not confirm ExUnit.start receives it"
+      assert hint =~ "built dynamically"
     end
 
     test "no registration anywhere fails with both setup hints" do
@@ -337,9 +353,50 @@ defmodule Temper.DoctorTest do
 
       facts = Doctor.gather(dir)
 
-      assert facts.helper_registrations == [Path.join(dir, "test/test_helper.exs")]
+      assert facts.helpers.registered == [Path.join(dir, "test/test_helper.exs")]
       assert %{children: [_a, _b], without_dep: [without]} = facts.umbrella
       assert without =~ "apps/b/mix.exs"
+    end
+
+    test "an alias or dynamic list is a mention, not a registration", %{dir: dir} do
+      File.mkdir_p!(Path.join(dir, "test"))
+
+      File.write!(Path.join(dir, "test/test_helper.exs"), """
+      alias Temper.Formatter
+      ExUnit.start()
+      """)
+
+      assert %{registered: [], mentioned: [helper]} = Doctor.gather(dir).helpers
+      assert helper =~ "test/test_helper.exs"
+
+      File.write!(Path.join(dir, "test/test_helper.exs"), """
+      formatters = [ExUnit.CLIFormatter, Temper.Formatter]
+      ExUnit.start(formatters: formatters)
+      """)
+
+      assert %{registered: [], mentioned: [_helper]} = Doctor.gather(dir).helpers
+    end
+
+    test "a :temper atom outside a dep tuple never counts as the dep", %{dir: dir} do
+      File.mkdir_p!(Path.join(dir, "apps/web"))
+
+      File.write!(Path.join(dir, "apps/web/mix.exs"), """
+      defmodule Web.MixProject do
+        def project, do: [dialyzer: [plt_add_apps: [:temper]]]
+        defp deps, do: []
+      end
+      """)
+
+      File.mkdir_p!(Path.join(dir, "apps/core"))
+
+      File.write!(Path.join(dir, "apps/core/mix.exs"), """
+      defmodule Core.MixProject do
+        defp deps, do: [{:temper, in_umbrella: true}]
+      end
+      """)
+
+      assert %{without_dep: [without]} = Doctor.gather(dir).umbrella
+      assert without =~ "apps/web/mix.exs"
     end
 
     test "comments, strings and lookalike atoms never count as setup", %{dir: dir} do
@@ -364,7 +421,7 @@ defmodule Temper.DoctorTest do
 
       facts = Doctor.gather(dir)
 
-      assert facts.helper_registrations == []
+      assert facts.helpers == %{registered: [], mentioned: []}
       assert %{without_dep: [without]} = facts.umbrella
       assert without =~ "apps/web/mix.exs"
     end
@@ -373,7 +430,7 @@ defmodule Temper.DoctorTest do
       File.mkdir_p!(Path.join(dir, "test"))
       File.write!(Path.join(dir, "test/test_helper.exs"), "ExUnit.start(formatters: [\n")
 
-      assert Doctor.gather(dir).helper_registrations == []
+      assert Doctor.gather(dir).helpers == %{registered: [], mentioned: []}
     end
 
     test "reads recorded history through the resolved glob", %{dir: dir} do
