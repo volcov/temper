@@ -40,11 +40,17 @@ defmodule Temper.Doctor do
           helper_mentions: [Path.t()],
           umbrella: :not_umbrella | %{children: [Path.t()], without_dep: [Path.t()]},
           current_history_path: String.t() | nil,
-          history: %{glob: Path.t(), result: Reader.result()}
+          history: %{glob: Path.t(), result: Reader.result()},
+          runs: %{last_test_run: integer() | nil, last_recorded: integer() | nil}
         }
 
   @doc """
   Gathers the facts the checks run on, relative to `root`.
+
+  `:runs` carries two POSIX mtimes: the newest ExUnit failures
+  manifest (`mix test` rewrites it on every run, recording or not)
+  and the newest history file. Comparing them tells whether the last
+  test run actually recorded — `nil` when the file does not exist.
 
   Options:
 
@@ -59,12 +65,22 @@ defmodule Temper.Doctor do
     glob =
       Template.to_glob(opts[:history] || config.history_path || current || Reader.default_glob())
 
+    result = Reader.read(join(root, glob))
+
+    # match_dot: both the .mix directory and the manifest are dotfiles.
+    manifests =
+      Path.wildcard(join(root, "_build/test/lib/*/.mix/.mix_test_failures"), match_dot: true)
+
     %{
       config: config,
       helper_mentions: helper_mentions(root),
       umbrella: umbrella(root),
       current_history_path: current,
-      history: %{glob: glob, result: Reader.read(join(root, glob))}
+      history: %{glob: glob, result: result},
+      runs: %{
+        last_test_run: newest_mtime(manifests),
+        last_recorded: newest_mtime(result.files)
+      }
     }
   end
 
@@ -106,10 +122,16 @@ defmodule Temper.Doctor do
 
   # Evidence policy: a source-code scan can never make this check
   # pass. `:ok` requires evaluated evidence (the Config.Reader-computed
-  # formatter list) or behavioral evidence (recorded history proves a
-  # formatter ran); the test_helper.exs mention scan only picks the
-  # warn or fail wording. Static analysis cannot decide what
+  # formatter list) or behavioral evidence (the latest test run
+  # demonstrably recorded); the test_helper.exs mention scan only
+  # picks the warn or fail wording. Static analysis cannot decide what
   # ExUnit.start receives at runtime, so it is never trusted to.
+  #
+  # History proves the run that wrote it, nothing later — so records
+  # count as current evidence only when the newest test-run manifest
+  # is no younger than the newest history write. A manifest younger
+  # than the history is the smoking gun this doctor exists for: a
+  # test run happened and recorded nothing.
   defp registration_check(facts) do
     formatters = facts.config.formatters || []
     mentions = facts.helper_mentions
@@ -119,20 +141,8 @@ defmodule Temper.Doctor do
       Temper.Formatter in formatters ->
         ok("formatter registration", "registered via config :ex_unit for the test env")
 
-      recorded? and mentions != [] ->
-        ok(
-          "formatter registration",
-          "confirmed by recorded history (mentioned in #{Enum.join(mentions, ", ")})"
-        )
-
       recorded? ->
-        warn(
-          "formatter registration",
-          "history holds records, but Temper.Formatter appears in no evaluated " <>
-            "config or test_helper.exs — was the registration removed? " <>
-            "New runs may record nothing",
-          registration_hint()
-        )
+        recorded_registration(facts.runs)
 
       mentions != [] ->
         warn(
@@ -162,6 +172,53 @@ defmodule Temper.Doctor do
         )
     end
   end
+
+  # What existing records prove depends on when the last test run
+  # happened relative to the last history write.
+  defp recorded_registration(runs) do
+    cond do
+      run_without_recording?(runs) ->
+        fail(
+          "formatter registration",
+          "the last test run (#{at(runs.last_test_run)}) recorded nothing — " <>
+            "history last grew at #{at(runs.last_recorded)}. The registration " <>
+            "was removed or stopped loading",
+          registration_hint()
+        )
+
+      run_recorded?(runs) ->
+        ok(
+          "formatter registration",
+          "confirmed by recorded history — the latest test run recorded outcomes"
+        )
+
+      true ->
+        warn(
+          "formatter registration",
+          "recorded history exists (last written #{at(runs.last_recorded)}), " <>
+            "but with no local test-run manifest to compare it proves a past " <>
+            "registration only",
+          "Run mix test once, then re-run mix temper.doctor — a fresh recorded " <>
+            "run is the confirmation."
+        )
+    end
+  end
+
+  # Both files are written at the end of the same `mix test` run, so a
+  # recording run leaves them within moments of each other; the slack
+  # absorbs that ordering, filesystem timestamp granularity included.
+  @run_slack_seconds 5
+
+  defp run_without_recording?(%{last_test_run: run, last_recorded: recorded}) do
+    is_integer(run) and (recorded == nil or run > recorded + @run_slack_seconds)
+  end
+
+  defp run_recorded?(%{last_test_run: run, last_recorded: recorded}) do
+    is_integer(run) and is_integer(recorded) and run <= recorded + @run_slack_seconds
+  end
+
+  defp at(nil), do: "unknown"
+  defp at(posix), do: posix |> DateTime.from_unix!() |> DateTime.to_iso8601()
 
   defp registration_hint do
     """
@@ -458,6 +515,17 @@ defmodule Temper.Doctor do
   defp dep_name(dep) when is_atom(dep), do: dep
   defp dep_name(dep) when is_tuple(dep) and tuple_size(dep) > 0, do: elem(dep, 0)
   defp dep_name(_malformed), do: nil
+
+  defp newest_mtime(paths) do
+    paths
+    |> Enum.flat_map(fn path ->
+      case File.stat(path, time: :posix) do
+        {:ok, %File.Stat{mtime: mtime}} -> [mtime]
+        {:error, _vanished} -> []
+      end
+    end)
+    |> Enum.max(fn -> nil end)
+  end
 
   # Absolute paths (e.g. a Path.expand-ed history_path) stay as they
   # are; "." as root keeps relative output readable.

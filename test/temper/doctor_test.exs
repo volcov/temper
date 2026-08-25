@@ -44,7 +44,8 @@ defmodule Temper.DoctorTest do
         helper_mentions: [],
         umbrella: :not_umbrella,
         current_history_path: nil,
-        history: %{glob: ".temper/history-*.jsonl", result: read_result()}
+        history: %{glob: ".temper/history-*.jsonl", result: read_result()},
+        runs: %{last_test_run: 1_000, last_recorded: 1_000}
       },
       Map.new(overrides)
     )
@@ -66,18 +67,42 @@ defmodule Temper.DoctorTest do
                check(checks, "formatter registration")
     end
 
-    test "a helper mention plus recorded history confirms registration" do
+    test "a recording latest test run confirms registration" do
+      checks =
+        Doctor.evaluate(facts(config: %{status: :missing, formatters: nil, history_path: nil}))
+
+      assert %{status: :ok, detail: detail} = check(checks, "formatter registration")
+      assert detail =~ "the latest test run recorded outcomes"
+    end
+
+    test "a test run newer than the history fails — even with stale mentions" do
       checks =
         Doctor.evaluate(
           facts(
             config: %{status: :missing, formatters: nil, history_path: nil},
-            helper_mentions: ["test/test_helper.exs"]
+            helper_mentions: ["test/test_helper.exs"],
+            runs: %{last_test_run: 2_000, last_recorded: 1_000}
           )
         )
 
-      assert %{status: :ok, detail: detail} = check(checks, "formatter registration")
-      assert detail =~ "confirmed by recorded history"
-      assert detail =~ "test/test_helper.exs"
+      assert %{status: :fail, detail: detail, hint: hint} =
+               check(checks, "formatter registration")
+
+      assert detail =~ "recorded nothing"
+      assert detail =~ "removed or stopped loading"
+      assert hint =~ "ExUnit.start(formatters:"
+    end
+
+    test "near-simultaneous manifest and history timestamps still confirm" do
+      checks =
+        Doctor.evaluate(
+          facts(
+            config: %{status: :missing, formatters: nil, history_path: nil},
+            runs: %{last_test_run: 1_003, last_recorded: 1_000}
+          )
+        )
+
+      assert %{status: :ok} = check(checks, "formatter registration")
     end
 
     test "a helper mention alone warns — only a recorded run is proof" do
@@ -97,12 +122,21 @@ defmodule Temper.DoctorTest do
       assert hint =~ "Run mix test once"
     end
 
-    test "records without any mention warn that registration may be gone" do
+    test "records without a test-run manifest to compare only warn" do
       checks =
-        Doctor.evaluate(facts(config: %{status: :missing, formatters: nil, history_path: nil}))
+        Doctor.evaluate(
+          facts(
+            config: %{status: :missing, formatters: nil, history_path: nil},
+            helper_mentions: ["test/test_helper.exs"],
+            runs: %{last_test_run: nil, last_recorded: 1_000}
+          )
+        )
 
-      assert %{status: :warn, detail: detail} = check(checks, "formatter registration")
-      assert detail =~ "was the registration removed?"
+      assert %{status: :warn, detail: detail, hint: hint} =
+               check(checks, "formatter registration")
+
+      assert detail =~ "proves a past registration only"
+      assert hint =~ "Run mix test once"
     end
 
     test "no registration anywhere fails with both setup hints" do
@@ -498,6 +532,25 @@ defmodule Temper.DoctorTest do
 
       assert facts.history.glob == ".temper/history-*.jsonl"
       assert [%Record{}] = facts.history.result.records
+    end
+
+    test "collects manifest and history mtimes for the run comparison", %{dir: dir} do
+      history = Path.join(dir, ".temper/history-0.jsonl")
+      File.mkdir_p!(Path.dirname(history))
+      File.write!(history, Codec.encode(record()) <> "\n")
+      File.touch!(history, 1_700_000_000)
+
+      manifest = Path.join(dir, "_build/test/lib/my_app/.mix/.mix_test_failures")
+      File.mkdir_p!(Path.dirname(manifest))
+      File.write!(manifest, "")
+      File.touch!(manifest, 1_700_009_999)
+
+      assert %{last_test_run: 1_700_009_999, last_recorded: 1_700_000_000} =
+               Doctor.gather(dir).runs
+    end
+
+    test "missing manifests and history leave the run mtimes nil", %{dir: dir} do
+      assert Doctor.gather(dir).runs == %{last_test_run: nil, last_recorded: nil}
     end
 
     test "the :history option overrides config and widens {partition}", %{dir: dir} do
