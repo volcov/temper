@@ -75,6 +75,32 @@ needs before its divergence counts, trading detection speed for
 confidence. The report always shows run counts so you can judge the
 evidence yourself.
 
+## FAQ
+
+**Does Temper re-run my tests?** No. Temper is a passive formatter —
+it adds zero test time. Every normal `mix test` run is one
+observation, and evidence accumulates across the runs you were
+already doing. (`--min-runs` is an evidence filter applied at report
+time, not a runner setting.)
+
+**Does it catch a test that passes on one commit and fails on the
+next?** No, by design: across commits there is no way to tell a flake
+from a change that broke — or fixed — the test. Detection is
+same-SHA-only, each commit building its own evidence bucket, trading
+some recall for zero false positives (see
+[How detection works](#how-detection-works)). A planned opt-in retry
+mode will close the recall gap.
+
+**Why is my finding under "Suspects"?** Its divergence involves runs
+from a dirty working tree — uncommitted changes could explain the
+differing outcomes, so confidence is lower. Divergence on clean,
+committed SHAs reports as flaky with full confidence.
+
+**Why does the report say nothing after one run?** One observation
+per test can never diverge — the earliest a flake can surface is the
+second run on the same SHA. Keep running your tests; the evidence
+builds itself.
+
 ## Recording in CI
 
 Temper detects CI (GitHub Actions, GitLab CI, CircleCI) and records
