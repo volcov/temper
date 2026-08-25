@@ -344,7 +344,7 @@ defmodule Temper.Doctor do
       join(root, "test/test_helper.exs")
       | Path.wildcard(join(root, "apps/*/test/test_helper.exs"))
     ]
-    |> Enum.filter(&mentions_temper?(&1, "Temper.Formatter"))
+    |> Enum.filter(fn path -> source_contains?(path, &formatter_alias?/1) end)
   end
 
   defp umbrella(root) do
@@ -355,17 +355,35 @@ defmodule Temper.Doctor do
       children ->
         %{
           children: children,
-          without_dep: Enum.reject(children, &mentions_temper?(&1, ":temper"))
+          without_dep:
+            Enum.reject(children, fn path -> source_contains?(path, &temper_atom?/1) end)
         }
     end
   end
 
-  defp mentions_temper?(path, marker) do
-    case File.read(path) do
-      {:ok, content} -> String.contains?(content, marker)
-      {:error, _reason} -> false
+  # The scan is over the parsed AST, not the raw text, so comments,
+  # docstrings and string literals cannot fake a registration or a
+  # dependency. A file that cannot be read or parsed counts as not
+  # containing the node — a broken file fails test runs loudly on its
+  # own, which is not the silent mode this doctor hunts.
+  defp source_contains?(path, node?) do
+    with {:ok, content} <- File.read(path),
+         {:ok, ast} <- Code.string_to_quoted(content) do
+      {_ast, found} =
+        Macro.prewalk(ast, false, fn node, acc -> {node, acc or node?.(node)} end)
+
+      found
+    else
+      {:error, _unreadable_or_unparsable} -> false
     end
   end
+
+  defp formatter_alias?({:__aliases__, _meta, [:Temper, :Formatter]}), do: true
+  defp formatter_alias?(_node), do: false
+
+  # Exact atom match: the dep tuple's :temper, never :temper_web or a
+  # "temper" string.
+  defp temper_atom?(node), do: node == :temper
 
   # Absolute paths (e.g. a Path.expand-ed history_path) stay as they
   # are; "." as root keeps relative output readable.

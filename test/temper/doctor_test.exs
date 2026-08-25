@@ -320,9 +320,19 @@ defmodule Temper.DoctorTest do
         "ExUnit.start(formatters: [ExUnit.CLIFormatter, Temper.Formatter])\n"
       )
 
-      for {app, dep} <- [{"a", ~s[{:temper, "~> 0.2"}]}, {"b", ""}] do
+      deps = [
+        {"a", "[{:temper, \"~> 0.2\", only: [:dev, :test], runtime: false}]"},
+        {"b", "[]"}
+      ]
+
+      for {app, list} <- deps do
         File.mkdir_p!(Path.join(dir, "apps/#{app}"))
-        File.write!(Path.join(dir, "apps/#{app}/mix.exs"), "# deps: #{dep}\n")
+
+        File.write!(Path.join(dir, "apps/#{app}/mix.exs"), """
+        defmodule #{String.upcase(app)}.MixProject do
+          defp deps, do: #{list}
+        end
+        """)
       end
 
       facts = Doctor.gather(dir)
@@ -330,6 +340,40 @@ defmodule Temper.DoctorTest do
       assert facts.helper_registrations == [Path.join(dir, "test/test_helper.exs")]
       assert %{children: [_a, _b], without_dep: [without]} = facts.umbrella
       assert without =~ "apps/b/mix.exs"
+    end
+
+    test "comments, strings and lookalike atoms never count as setup", %{dir: dir} do
+      File.mkdir_p!(Path.join(dir, "test"))
+
+      File.write!(Path.join(dir, "test/test_helper.exs"), """
+      # TODO: enable Temper again
+      # ExUnit.start(formatters: [ExUnit.CLIFormatter, Temper.Formatter])
+      IO.puts("without Temper.Formatter")
+      ExUnit.start()
+      """)
+
+      File.mkdir_p!(Path.join(dir, "apps/web"))
+
+      File.write!(Path.join(dir, "apps/web/mix.exs"), """
+      defmodule TemperWeb.MixProject do
+        # {:temper, "~> 0.2"} lives at the umbrella root
+        def project, do: [app: :temper_web, description: "uses :temper indirectly"]
+        defp deps, do: []
+      end
+      """)
+
+      facts = Doctor.gather(dir)
+
+      assert facts.helper_registrations == []
+      assert %{without_dep: [without]} = facts.umbrella
+      assert without =~ "apps/web/mix.exs"
+    end
+
+    test "an unparsable helper counts as unregistered, not a crash", %{dir: dir} do
+      File.mkdir_p!(Path.join(dir, "test"))
+      File.write!(Path.join(dir, "test/test_helper.exs"), "ExUnit.start(formatters: [\n")
+
+      assert Doctor.gather(dir).helper_registrations == []
     end
 
     test "reads recorded history through the resolved glob", %{dir: dir} do
