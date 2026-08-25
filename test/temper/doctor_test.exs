@@ -67,12 +67,28 @@ defmodule Temper.DoctorTest do
                check(checks, "formatter registration")
     end
 
-    test "a recording latest test run confirms registration" do
+    test "a recording latest test run plus a current mention confirms registration" do
       checks =
-        Doctor.evaluate(facts(config: %{status: :missing, formatters: nil, history_path: nil}))
+        Doctor.evaluate(
+          facts(
+            config: %{status: :missing, formatters: nil, history_path: nil},
+            helper_mentions: ["test/test_helper.exs"]
+          )
+        )
 
       assert %{status: :ok, detail: detail} = check(checks, "formatter registration")
       assert detail =~ "manifest and the newest history write coincide"
+    end
+
+    test "a recording run with no remaining mention warns about removal" do
+      checks =
+        Doctor.evaluate(facts(config: %{status: :missing, formatters: nil, history_path: nil}))
+
+      assert %{status: :warn, detail: detail, hint: hint} =
+               check(checks, "formatter registration")
+
+      assert detail =~ "the next run will record nothing"
+      assert hint =~ "ExUnit.start(formatters:"
     end
 
     test "a test run newer than the history fails — even with stale mentions" do
@@ -98,6 +114,7 @@ defmodule Temper.DoctorTest do
         Doctor.evaluate(
           facts(
             config: %{status: :missing, formatters: nil, history_path: nil},
+            helper_mentions: ["test/test_helper.exs"],
             runs: %{last_test_run: 1_003, last_recorded: 1_000}
           )
         )

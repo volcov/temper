@@ -142,7 +142,7 @@ defmodule Temper.Doctor do
         ok("formatter registration", "registered via config :ex_unit for the test env")
 
       recorded? ->
-        recorded_registration(facts.runs)
+        recorded_registration(facts.runs, mentions)
 
       mentions != [] ->
         warn(
@@ -174,8 +174,12 @@ defmodule Temper.Doctor do
   end
 
   # What existing records prove depends on when the last test run
-  # happened relative to the last history write.
-  defp recorded_registration(runs) do
+  # happened relative to the last history write — and history is only
+  # current evidence while the sources that produced it still show the
+  # formatter: a clean removal since the last run is visible as
+  # records with no remaining mention anywhere, and the next run would
+  # record nothing.
+  defp recorded_registration(runs, mentions) do
     cond do
       run_without_recording?(runs) ->
         fail(
@@ -183,6 +187,15 @@ defmodule Temper.Doctor do
           "the last test run (#{at(runs.last_test_run)}) recorded nothing — " <>
             "history last grew at #{at(runs.last_recorded)}. The registration " <>
             "was removed or stopped loading",
+          registration_hint()
+        )
+
+      run_recorded?(runs) and mentions == [] ->
+        warn(
+          "formatter registration",
+          "the last test run recorded, but Temper.Formatter now appears in no " <>
+            "evaluated config or test_helper.exs — if it was removed since, " <>
+            "the next run will record nothing",
           registration_hint()
         )
 
