@@ -21,7 +21,9 @@ defmodule Mix.Tasks.Temper.Report do
     * `--min-runs N` — minimum runs on a SHA for its divergence to
       count as evidence (default: 2)
     * `--history GLOB` — read this path or glob instead of the default
-      (also configurable with `config :temper, history_path: "..."`)
+      (also configurable with `config :temper, history_path: "..."`).
+      A literal `{partition}` widens to `*`, covering every partition's
+      file
 
   """
 
@@ -29,6 +31,7 @@ defmodule Mix.Tasks.Temper.Report do
 
   alias Temper.Analysis
   alias Temper.History.Reader
+  alias Temper.History.Template
   alias Temper.Report
 
   @switches [json: :boolean, by_app: :boolean, min_runs: :integer, history: :string]
@@ -38,7 +41,9 @@ defmodule Mix.Tasks.Temper.Report do
     {opts, _args} = OptionParser.parse!(argv, strict: @switches)
 
     source =
-      opts[:history] || Application.get_env(:temper, :history_path) || Reader.default_glob()
+      Template.to_glob(
+        opts[:history] || Application.get_env(:temper, :history_path) || Reader.default_glob()
+      )
 
     result = Reader.read(source)
     analysis = Analysis.analyze(result.records, Keyword.take(opts, [:min_runs]))

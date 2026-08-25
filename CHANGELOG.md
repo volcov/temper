@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `{partition}` placeholder in `history_path`: the formatter expands
+  it with the `MIX_TEST_PARTITION` value (`"0"` when unset) and
+  `mix temper.report` / `mix temper.clean` widen it to `*` — custom
+  paths are partition-safe by construction instead of by recipe.
+
 ## [0.2.0] - 2026-08-23
 
 ### Added

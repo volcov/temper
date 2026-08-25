@@ -14,13 +14,15 @@ defmodule Mix.Tasks.Temper.Clean do
 
     * `--history GLOB` — delete files matching this path or glob
       instead of the default (also configurable with
-      `config :temper, history_path: "..."`)
+      `config :temper, history_path: "..."`). A literal `{partition}`
+      widens to `*`, covering every partition's file
 
   """
 
   use Mix.Task
 
   alias Temper.History.Reader
+  alias Temper.History.Template
 
   @switches [history: :string]
 
@@ -29,7 +31,9 @@ defmodule Mix.Tasks.Temper.Clean do
     {opts, _args} = OptionParser.parse!(argv, strict: @switches)
 
     source =
-      opts[:history] || Application.get_env(:temper, :history_path) || Reader.default_glob()
+      Template.to_glob(
+        opts[:history] || Application.get_env(:temper, :history_path) || Reader.default_glob()
+      )
 
     matches = Path.wildcard(source)
     {files, directories} = Enum.split_with(matches, &File.regular?/1)
