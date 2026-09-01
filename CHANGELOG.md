@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `mix temper.merge --output FILE [GLOBS...]` merges history files
+  into one deduplicated file — the aggregation step for CI artifact
+  flows (one `.temper/` artifact per job, download, merge, report)
+  and for compacting overlapping cache restores. Dedupe is byte-exact
+  on whole lines; lines this version does not interpret (suite
+  summaries, future schema versions) are preserved verbatim, and only
+  corrupt lines are skipped, with counts reported.
+
 ### Changed
 
 - `mix temper.doctor` dates a partial SHA gap: the `recorded commit
