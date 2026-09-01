@@ -387,6 +387,13 @@ defmodule Temper.Doctor do
   # gap can: a null-SHA record as new as the newest record overall means
   # the recording-blind path is still active; an older one marks when it
   # closed, and everything since is legacy noise.
+  #
+  # Timestamps are second-truncated, so a blind run and a recording run
+  # started within the same second tie. A tie deliberately reads as
+  # still occurring: the records carry no ordering evidence inside one
+  # second, and the alternative — declaring the gap closed — would be a
+  # false all-clear, the worse error for a diagnostic. "Closed" is only
+  # ever claimed on a strictly newer SHA-carrying record.
   defp sha_gap_age(missing, records) do
     newest_missing = missing |> Enum.map(& &1.context.at) |> Enum.max()
 
