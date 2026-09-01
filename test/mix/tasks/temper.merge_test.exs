@@ -113,6 +113,21 @@ defmodule Mix.Tasks.Temper.MergeTest do
     assert File.read!(output_path) == line("test x") <> "\n" <> future <> "\n"
   end
 
+  test "globs reach histories inside dot-directories", %{dir: dir} do
+    kept = line("test hidden")
+
+    File.mkdir_p!(Path.join(dir, "artifacts/job1/.temper"))
+    File.write!(Path.join(dir, "artifacts/job1/.temper/history-0.jsonl"), kept <> "\n")
+
+    output_path = Path.join(dir, "merged.jsonl")
+
+    output =
+      run_merge(["--output", output_path, Path.join(dir, "artifacts/**/history-*.jsonl")])
+
+    assert output =~ "Merged 1 lines from 1 files"
+    assert File.read!(output_path) == kept <> "\n"
+  end
+
   test "no matching files reports and creates nothing", %{dir: dir} do
     output_path = Path.join(dir, "merged.jsonl")
     output = run_merge(["--output", output_path, Path.join(dir, "nope-*.jsonl")])
