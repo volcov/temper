@@ -104,9 +104,18 @@ defmodule Mix.Tasks.Temper.Clean do
         keep_shas: retention[:keep_shas]
       )
 
-    removed = Enum.count(result.files, fn {path, kept} -> rewrite(path, kept) == :removed end)
+    outcomes = Enum.map(result.files, fn {path, kept} -> rewrite(path, kept) end)
 
-    Mix.shell().info(message(result, removed))
+    Enum.zip(result.files, outcomes)
+    |> Enum.each(fn
+      {{path, _kept}, :failed} -> Mix.shell().error("Could not rewrite #{path}.")
+      {_file, _ok} -> :ok
+    end)
+
+    removed = Enum.count(outcomes, &(&1 == :removed))
+    failed = Enum.count(outcomes, &(&1 == :failed))
+
+    Mix.shell().info(message(result, removed, failed))
   end
 
   defp read_lines(files) do
@@ -125,28 +134,38 @@ defmodule Mix.Tasks.Temper.Clean do
   defp cutoff(nil), do: nil
 
   defp cutoff(days) do
-    DateTime.utc_now()
-    |> DateTime.add(-days * 86_400, :second)
-    |> DateTime.truncate(:second)
-    |> DateTime.to_iso8601()
+    DateTime.add(DateTime.utc_now(), -days * 86_400, :second)
   end
 
   defp rewrite(path, []) do
-    File.rm!(path)
-    :removed
+    case File.rm(path) do
+      :ok -> :removed
+      {:error, _reason} -> :failed
+    end
   end
 
+  # Write-to-temp-then-rename keeps each file all-or-nothing: a
+  # failure leaves the old content intact instead of a half-truncated
+  # file, which is what makes the failure report below true.
   defp rewrite(path, lines) do
-    File.write!(path, Enum.map(lines, &[&1, "\n"]))
-    :rewritten
+    temp = path <> ".tmp"
+
+    with :ok <- File.write(temp, Enum.map(lines, &[&1, "\n"])),
+         :ok <- File.rename(temp, path) do
+      :rewritten
+    else
+      {:error, _reason} ->
+        _ = File.rm(temp)
+        :failed
+    end
   end
 
-  defp message(result, removed) do
+  defp message(result, removed, failed) do
     kept = result.files |> Enum.map(fn {_path, lines} -> length(lines) end) |> Enum.sum()
     total = kept + result.pruned + result.corrupt
 
     "Pruned #{result.pruned} of #{total} lines across #{length(result.files)} files." <>
-      removed_note(removed) <> corrupt_note(result.corrupt)
+      removed_note(removed) <> corrupt_note(result.corrupt) <> failed_note(failed)
   end
 
   defp removed_note(0), do: ""
@@ -154,4 +173,7 @@ defmodule Mix.Tasks.Temper.Clean do
 
   defp corrupt_note(0), do: ""
   defp corrupt_note(count), do: " #{count} corrupt lines dropped."
+
+  defp failed_note(0), do: ""
+  defp failed_note(count), do: " #{count} files kept their old content."
 end

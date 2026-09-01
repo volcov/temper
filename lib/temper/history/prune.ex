@@ -27,8 +27,8 @@ defmodule Temper.History.Prune do
 
   Options (a `nil` value disables that criterion):
 
-    * `:cutoff` — an ISO 8601 UTC timestamp; lines whose `"at"` is
-      older are dropped
+    * `:cutoff` — a `DateTime`; lines whose `"at"` is older are
+      dropped
     * `:keep_shas` — how many of the most recently recorded distinct
       SHAs to keep, ranked by each SHA's newest line across all files
 
@@ -91,10 +91,21 @@ defmodule Temper.History.Prune do
     end
   end
 
-  # Context timestamps are ISO 8601 UTC strings, so age is a plain
-  # string comparison against the cutoff.
+  # Timestamps are parsed, never compared as strings: Temper's own
+  # writer emits second-truncated UTC, but retention reads lines
+  # generically, and a third-party producer's fractional seconds or
+  # numeric offset would misorder lexically — and a misorder here
+  # deletes data. An unparseable timestamp is unreadable, so the line
+  # survives.
   defp within_age?(_map, nil), do: true
-  defp within_age?(%{"at" => at}, cutoff) when is_binary(at), do: at >= cutoff
+
+  defp within_age?(%{"at" => at}, cutoff) when is_binary(at) do
+    case DateTime.from_iso8601(at) do
+      {:ok, datetime, _offset} -> DateTime.compare(datetime, cutoff) != :lt
+      {:error, _unreadable} -> true
+    end
+  end
+
   defp within_age?(_no_timestamp, _cutoff), do: true
 
   defp within_shas?(_map, nil), do: true
@@ -110,15 +121,23 @@ defmodule Temper.History.Prune do
     decoded
     |> Enum.flat_map(fn {_path, lines} -> lines end)
     |> Enum.reduce(%{}, &newest_by_sha/2)
-    |> Enum.sort_by(fn {_sha, at} -> at end, :desc)
+    |> Enum.sort_by(fn {_sha, at} -> at end, {:desc, DateTime})
     |> Enum.take(count)
     |> MapSet.new(fn {sha, _at} -> sha end)
   end
 
+  # Ranking parses timestamps for the same reason within_age?/2 does;
+  # a SHA whose every timestamp is unparseable never ranks, and its
+  # lines then drop with any other unkept SHA.
   defp newest_by_sha({:ok, _line, %{"sha" => sha, "at" => at}}, acc)
        when is_binary(sha) and is_binary(at) do
-    Map.update(acc, sha, at, &max(&1, at))
+    case DateTime.from_iso8601(at) do
+      {:ok, datetime, _offset} -> Map.update(acc, sha, datetime, &later(&1, datetime))
+      {:error, _unreadable} -> acc
+    end
   end
 
   defp newest_by_sha(_other, acc), do: acc
+
+  defp later(a, b), do: if(DateTime.compare(a, b) == :lt, do: b, else: a)
 end

@@ -41,7 +41,7 @@ defmodule Temper.History.PruneTest do
       old = test_line(at: "2026-05-01T00:00:00Z")
       new = test_line(at: "2026-08-24T12:00:00Z")
 
-      result = Prune.prune([{"h-0.jsonl", [old, new]}], cutoff: "2026-08-01T00:00:00Z")
+      result = Prune.prune([{"h-0.jsonl", [old, new]}], cutoff: ~U[2026-08-01 00:00:00Z])
 
       assert result.files == [{"h-0.jsonl", [new]}]
       assert result.pruned == 1
@@ -53,16 +53,31 @@ defmodule Temper.History.PruneTest do
       new_suite = suite_line("2026-08-24T12:00:00Z")
 
       result =
-        Prune.prune([{"h-0.jsonl", [old_suite, new_suite]}], cutoff: "2026-08-01T00:00:00Z")
+        Prune.prune([{"h-0.jsonl", [old_suite, new_suite]}], cutoff: ~U[2026-08-01 00:00:00Z])
 
       assert result.files == [{"h-0.jsonl", [new_suite]}]
+      assert result.pruned == 1
+    end
+
+    test "timestamps order chronologically, not lexically" do
+      fractional = test_line(at: "2026-08-01T00:00:00.500Z", name: "test fractional")
+      offset = test_line(at: "2026-08-01T02:00:00+02:00", name: "test offset")
+      older = test_line(at: "2026-07-31T23:59:59Z", name: "test older")
+
+      result =
+        Prune.prune(
+          [{"h-0.jsonl", [fractional, offset, older]}],
+          cutoff: ~U[2026-08-01 00:00:00Z]
+        )
+
+      assert result.files == [{"h-0.jsonl", [fractional, offset]}]
       assert result.pruned == 1
     end
 
     test "lines without a readable timestamp are preserved" do
       future = ~s({"schema":2,"kind":"checkpoint","payload":true})
 
-      result = Prune.prune([{"h-0.jsonl", [future]}], cutoff: "2026-08-01T00:00:00Z")
+      result = Prune.prune([{"h-0.jsonl", [future]}], cutoff: ~U[2026-08-01 00:00:00Z])
 
       assert result.files == [{"h-0.jsonl", [future]}]
       assert result.pruned == 0
@@ -96,6 +111,16 @@ defmodule Temper.History.PruneTest do
       assert result.pruned == 1
     end
 
+    test "SHA ranking parses timestamps instead of comparing strings" do
+      fractional_newer = test_line(sha: "sha_frac", at: "2026-08-10T00:00:00.900Z")
+      plain_older = test_line(sha: "sha_plain", at: "2026-08-10T00:00:00Z")
+
+      result = Prune.prune([{"h-0.jsonl", [fractional_newer, plain_older]}], keep_shas: 1)
+
+      assert result.files == [{"h-0.jsonl", [fractional_newer]}]
+      assert result.pruned == 1
+    end
+
     test "lines without a SHA are untouched by SHA retention" do
       null_sha = test_line(sha: nil, at: "2026-01-01T00:00:00Z")
       suite = suite_line("2026-01-01T00:00:00Z")
@@ -117,7 +142,7 @@ defmodule Temper.History.PruneTest do
     result =
       Prune.prune(
         [{"h-0.jsonl", [old_kept_sha, new_kept_sha, new_dropped_sha]}],
-        cutoff: "2026-08-01T00:00:00Z",
+        cutoff: ~U[2026-08-01 00:00:00Z],
         keep_shas: 1
       )
 
@@ -131,7 +156,7 @@ defmodule Temper.History.PruneTest do
     result =
       Prune.prune(
         [{"h-0.jsonl", ["not json", "", kept]}],
-        cutoff: "2026-01-01T00:00:00Z"
+        cutoff: ~U[2026-01-01 00:00:00Z]
       )
 
     assert result.files == [{"h-0.jsonl", [kept]}]

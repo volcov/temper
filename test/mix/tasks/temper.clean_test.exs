@@ -145,6 +145,24 @@ defmodule Mix.Tasks.Temper.CleanTest do
       assert File.read!(path) == recent <> "\n"
     end
 
+    test "a file that cannot be rewritten keeps its old content and is reported", %{dir: dir} do
+      old = line(at: days_ago(120), name: "test old")
+      recent = line(at: days_ago(5), name: "test recent")
+
+      path = Path.join(dir, "history-0.jsonl")
+      File.write!(path, old <> "\n" <> recent <> "\n")
+
+      File.chmod!(dir, 0o555)
+      on_exit(fn -> File.chmod(dir, 0o755) end)
+
+      output = run_clean(["--history", path, "--older-than", "90"])
+
+      assert output =~ "1 files kept their old content."
+      assert_received {:mix_shell, :error, [error]}
+      assert error == "Could not rewrite #{path}."
+      assert File.read!(path) == old <> "\n" <> recent <> "\n"
+    end
+
     test "a non-positive --older-than aborts", %{dir: dir} do
       assert_raise Mix.Error, ~r/positive/, fn ->
         Mix.Task.rerun("temper.clean", [
