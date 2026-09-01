@@ -321,12 +321,43 @@ defmodule Temper.DoctorTest do
       assert hint =~ "TEMPER_SHA"
     end
 
-    test "a partial SHA gap warns" do
+    test "a partial SHA gap warns and dates its newest record" do
       result = read_result(records: [record(), record(sha: nil)])
       checks = Doctor.evaluate(facts(history: %{glob: "g", result: result}))
 
       assert %{status: :warn, detail: detail} = check(checks, "recorded commit SHAs")
       assert detail =~ "1 of 2 records"
+      assert detail =~ "newest 2026-08-24T12:00:00Z"
+    end
+
+    test "a gap reaching the newest record reads as still occurring" do
+      result =
+        read_result(
+          records: [
+            record(at: "2026-08-23T09:00:00Z"),
+            record(at: "2026-08-24T12:00:00Z", sha: nil)
+          ]
+        )
+
+      checks = Doctor.evaluate(facts(history: %{glob: "g", result: result}))
+
+      assert %{status: :warn, detail: detail} = check(checks, "recorded commit SHAs")
+      assert detail =~ "newest 2026-08-24T12:00:00Z — still occurring"
+    end
+
+    test "a gap older than the newest record reads as closed" do
+      result =
+        read_result(
+          records: [
+            record(at: "2026-08-23T09:00:00Z", sha: nil),
+            record(at: "2026-08-24T12:00:00Z")
+          ]
+        )
+
+      checks = Doctor.evaluate(facts(history: %{glob: "g", result: result}))
+
+      assert %{status: :warn, detail: detail} = check(checks, "recorded commit SHAs")
+      assert detail =~ "newest 2026-08-23T09:00:00Z — every record since carries a SHA"
     end
   end
 
