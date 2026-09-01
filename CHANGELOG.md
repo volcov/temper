@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `mix temper.clean --older-than DAYS` and `--keep-shas N` prune
+  history instead of deleting it: files are rewritten in place
+  keeping only lines inside the retention window, emptied files are
+  removed, and corrupt lines are dropped with a count. A criterion
+  only drops lines it can positively match — lines without a SHA
+  (suite summaries, null-SHA records) are untouched by `--keep-shas`
+  and age out via `--older-than`. Keeps a history persisted across
+  CI runs bounded.
+
 - `mix temper.merge --output FILE [GLOBS...]` merges history files
   into one deduplicated file — the aggregation step for CI artifact
   flows (one `.temper/` artifact per job, download, merge, report)
