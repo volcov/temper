@@ -3,9 +3,11 @@ defmodule Temper.History.Merge do
   Merges history lines from several sources into one deduplicated
   stream — the aggregation step behind `mix temper.merge`.
 
-  Dedupe is byte-exact on whole lines: overlapping CI cache restores
-  and re-downloaded artifacts duplicate identical lines, and only
-  those. Lines are otherwise opaque — a merge rewrites files, so it
+  Dedupe is byte-exact on whole trimmed lines: overlapping CI cache
+  restores and re-downloaded artifacts duplicate identical lines, and
+  only those. Callers trim before handing lines in (as the reader
+  trims before decoding), so whitespace-padded copies of one record
+  collapse instead of decoding into double-counted records downstream. Lines are otherwise opaque — a merge rewrites files, so it
   must not drop what it merely does not interpret. Suite summaries and
   future schema versions pass through verbatim; only lines the codec
   calls corrupt (truncated cache tails) are dropped, and counted.

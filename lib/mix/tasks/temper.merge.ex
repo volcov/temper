@@ -13,16 +13,21 @@ defmodule Mix.Tasks.Temper.Merge do
   `mix temper.report` against the result. Merging also compacts
   overlapping cache restores — byte-identical lines are written once.
 
-  Positional arguments are input paths or globs; a literal
-  `{partition}` widens to `*`. Without arguments, inputs default to
+  Positional arguments are input globs (a plain path is a glob
+  matching just itself); a literal `{partition}` widens to `*`.
+  Without arguments, inputs default to
   the configured history path (`config :temper, history_path`) or the
   default `.temper/history-*.jsonl` — useful for compacting every
   partition's file into one.
 
   Lines this Temper version does not interpret (suite summaries,
   future schema versions) are preserved verbatim; corrupt lines
-  (truncated cache tails) are skipped and counted. The output file is
-  replaced, and may itself be one of the inputs.
+  (truncated cache tails) are skipped and counted. Surrounding
+  whitespace is normalized away before comparison, exactly as the
+  reader does — so whitespace-padded copies of a record (a
+  CRLF-converted file, an edited line) dedupe instead of turning into
+  double-counted records. The output file is replaced, and may itself
+  be one of the inputs.
 
   ## Options
 
