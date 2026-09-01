@@ -14,8 +14,9 @@ defmodule Mix.Tasks.Temper.Merge do
   overlapping cache restores — byte-identical lines are written once.
 
   Positional arguments are input globs (a plain path is a glob
-  matching just itself); a literal `{partition}` widens to `*`.
-  Without arguments, inputs default to
+  matching just itself); a literal `{partition}` widens to `*`, and
+  globs match into dot-directories, since artifact downloads keep
+  history inside `.temper/`. Without arguments, inputs default to
   the configured history path (`config :temper, history_path`) or the
   default `.temper/history-*.jsonl` — useful for compacting every
   partition's file into one.
@@ -50,10 +51,13 @@ defmodule Mix.Tasks.Temper.Merge do
 
     sources = if sources == [], do: [default_source()], else: sources
 
+    # match_dot: history lives in dot-directories by design — .temper
+    # itself, and artifact downloads that preserve it (GitLab,
+    # CircleCI). Without it, ** cannot reach them at all.
     {files, irregular} =
       sources
       |> Enum.map(&Template.to_glob/1)
-      |> Enum.flat_map(&Path.wildcard/1)
+      |> Enum.flat_map(&Path.wildcard(&1, match_dot: true))
       |> Enum.uniq()
       |> Enum.sort()
       |> Enum.split_with(&File.regular?/1)
