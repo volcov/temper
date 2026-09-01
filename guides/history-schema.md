@@ -124,10 +124,16 @@ without one may come from an interrupted run.
   emits second-truncated UTC `Z` timestamps, but other producers may
   legally emit fractional seconds or numeric offsets, which misorder
   under string comparison.
-- A tool that rewrites files (compaction, retention) must preserve
-  lines it does not interpret, dropping only what is positively
-  corrupt. `mix temper.merge` and `mix temper.clean --older-than` /
-  `--keep-shas` follow this rule.
+- A tool that rewrites files must never drop a line merely because
+  it cannot interpret it; only positively corrupt lines (unreadable
+  JSON) may always be dropped. Compaction (`mix temper.merge`)
+  preserves every non-corrupt line verbatim. Retention
+  (`mix temper.clean --older-than` / `--keep-shas`) reads `at` and
+  `sha` generically from every line, unknown schemas and kinds
+  included, and drops exactly the lines it can positively match
+  against the requested window: an old suite summary or
+  future-format line ages out like any other, while a line whose
+  relevant field cannot be read survives.
 - Byte-identical lines describe the same recorded event (they can
   only arise from copying, such as overlapping CI cache restores)
   and are safe to deduplicate. `mix temper.merge` does exactly that.
