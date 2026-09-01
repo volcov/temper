@@ -44,7 +44,7 @@ defmodule Temper.MixProject do
       main: "readme",
       source_url: @source_url,
       source_ref: "v#{@version}",
-      extras: ["README.md", "CHANGELOG.md", "LICENSE"]
+      extras: ["README.md", "guides/history-schema.md", "CHANGELOG.md", "LICENSE"]
     ]
   end
 end

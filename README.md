@@ -40,7 +40,9 @@ ExUnit.start(formatters: [ExUnit.CLIFormatter, Temper.Formatter])
 ```
 
 Add `.temper/` to your `.gitignore`. Run your tests as usual — Temper
-appends each outcome to `.temper/history-*.jsonl`. Once history
+appends each outcome to `.temper/history-*.jsonl`, one self-contained
+JSON object per line (the format is a documented contract: see the
+[History Schema guide](guides/history-schema.md)). Once history
 accumulates, ask for the report:
 
 ```
