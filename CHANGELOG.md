@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- CI Recipes guide on hexdocs: GitLab CI and CircleCI persistence
+  recipes (cache semantics per provider, parallel-job lineages), the
+  artifact download-and-merge flow for inspecting history locally,
+  and keeping a cached history bounded with the retention flags. The
+  README keeps the GitHub Actions recipe and links the guide.
+
 - History Schema guide on hexdocs: the JSONL line format (schema v1)
   documented as a public contract — envelope, every field with type
   and nullability, failure signatures, suite lines, consumer and

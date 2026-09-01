@@ -138,8 +138,14 @@ only the first job's history. Add the partition to the key:
 Partitioned suites (`MIX_TEST_PARTITION`) write one history file per
 partition, so the files never collide — to report across all
 partitions, restore each partition's cache into `.temper/` (one
-`actions/cache` step per partition, or pull the caches locally) and
-run `mix temper.report`; it reads every `history-*.jsonl` it finds.
+`actions/cache` step per partition, or download the partitions as
+artifacts and `mix temper.merge` them) and run `mix temper.report`;
+it reads every `history-*.jsonl` it finds.
+
+Recipes for GitLab CI and CircleCI, the artifact
+download-and-merge flow for inspecting history locally, and keeping
+a cached history bounded with `mix temper.clean` are collected in
+the [CI Recipes guide](guides/ci-recipes.md).
 
 `mix temper.report` always exits 0 — it informs, it does not gate CI.
 
