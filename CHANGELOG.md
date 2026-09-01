@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `mix temper.doctor` dates a partial SHA gap: the `recorded commit
+  SHAs` warning now reports the newest null-SHA record's timestamp and
+  whether the gap is still occurring or every record since carries a
+  SHA — legacy noise and an active recording-blind path are
+  distinguishable at a glance.
+
 ## [0.2.1] - 2026-08-25
 
 ### Added

@@ -355,14 +355,14 @@ defmodule Temper.Doctor do
   defp sha_check(facts) do
     records = facts.history.result.records
     total = length(records)
-    missing = Enum.count(records, &is_nil(&1.context.sha))
+    missing = Enum.filter(records, &is_nil(&1.context.sha))
 
     hint =
       "Runs outside a git repository record \"sha\":null. In containers, pass " <>
         "TEMPER_SHA in (see README: Containers and environments without git)."
 
     cond do
-      missing == total ->
+      length(missing) == total ->
         fail(
           "recorded commit SHAs",
           "none of the #{total} records carry a commit SHA — " <>
@@ -370,15 +370,37 @@ defmodule Temper.Doctor do
           hint
         )
 
-      missing > 0 ->
+      missing != [] ->
         warn(
           "recorded commit SHAs",
-          "#{missing} of #{total} records carry no commit SHA and can never be classified",
+          "#{length(missing)} of #{total} records carry no commit SHA and can never " <>
+            "be classified, #{sha_gap_age(missing, records)}",
           hint
         )
 
       true ->
         ok("recorded commit SHAs", "all #{total} records carry a commit SHA")
+    end
+  end
+
+  # A count alone cannot answer "is this still happening?" — dating the
+  # gap can: a null-SHA record as new as the newest record overall means
+  # the recording-blind path is still active; an older one marks when it
+  # closed, and everything since is legacy noise.
+  #
+  # Timestamps are second-truncated, so a blind run and a recording run
+  # started within the same second tie. A tie deliberately reads as
+  # still occurring: the records carry no ordering evidence inside one
+  # second, and the alternative — declaring the gap closed — would be a
+  # false all-clear, the worse error for a diagnostic. "Closed" is only
+  # ever claimed on a strictly newer SHA-carrying record.
+  defp sha_gap_age(missing, records) do
+    newest_missing = missing |> Enum.map(& &1.context.at) |> Enum.max()
+
+    if newest_missing == last_recorded_at(records) do
+      "newest #{newest_missing} — still occurring"
+    else
+      "newest #{newest_missing} — every record since carries a SHA"
     end
   end
 
