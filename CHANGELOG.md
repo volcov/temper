@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- History Schema guide on hexdocs: the JSONL line format (schema v1)
+  documented as a public contract — envelope, every field with type
+  and nullability, failure signatures, suite lines, consumer and
+  producer rules, and the versioning policy (additive within v1,
+  breaking changes bump the `schema` number).
+
 - `mix temper.clean --older-than DAYS` and `--keep-shas N` prune
   history instead of deleting it: files are rewritten in place
   keeping only lines inside the retention window, emptied files are
