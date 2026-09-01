@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-01
+
 ### Added
 
 - CI Recipes guide on hexdocs: GitLab CI and CircleCI persistence
@@ -35,10 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flows (one `.temper/` artifact per job, download, merge, report)
   and for compacting overlapping cache restores. Input globs match
   into dot-directories (artifact downloads keep history inside
-  `.temper/`). Dedupe is byte-exact
-  on whole lines; lines this version does not interpret (suite
-  summaries, future schema versions) are preserved verbatim, and only
-  corrupt lines are skipped, with counts reported.
+  `.temper/`). Dedupe is byte-exact on whole lines; lines this
+  version does not interpret (suite summaries, future schema
+  versions) are preserved verbatim, and only corrupt lines are
+  skipped, with counts reported.
 
 ### Changed
 
