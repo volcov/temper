@@ -246,6 +246,21 @@ on it.
 | `--history GLOB` (report/clean/doctor) | the setting above | one-off override |
 | `--min-runs N` (report) | `2` | evidence threshold per SHA |
 | `--json` (report) | off | machine-readable output |
+| `config :temper, :push, ...` | none | where `mix temper.push` sends history: `preset: :sinter`, or an `adapter:` with its options (see the [Push Protocol guide](guides/push-protocol.md)). Nothing is sent until this is set |
+| `--preset NAME` / `--url URL` (push) | the setting above | one-off destination override |
+| `--scrub-messages` (push) | off | remove failure messages before sending (kind and hash stay) |
+| `--all` / `--strict` / `--dry-run` (push) | off | resend accepted runs / exit 1 on a failed push / show what would be sent |
+| `.temper/pushed-runs-*` | written by push | run ids each destination accepted (one file per destination); keep them in the CI cache with the history |
+
+## Pushing history
+
+`mix temper.push` sends recorded history to a system that follows
+flakes across every CI run of a repository, such as
+[Sinter](https://sinterlab.dev), any server speaking Temper's open
+push protocol, or your own `Temper.Push.Adapter`. Nothing is sent until
+you configure a destination; see the
+[CI Recipes guide](guides/ci-recipes.md#pushing-history-to-a-collector)
+and the [Push Protocol guide](guides/push-protocol.md).
 
 ## What Temper does — and doesn't
 
