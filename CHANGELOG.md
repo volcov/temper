@@ -10,9 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `mix temper.push` sends recorded history to a configured destination,
-  only the runs it has not accepted yet: accepted run ids are kept in
-  `pushed-runs` next to the history (cache it with the history). Large
-  histories go out in batches of whole runs. A failed push warns and
+  only the runs it has not accepted yet: accepted run ids are kept in a
+  `pushed-runs-*` file per destination next to the history (cache it with
+  the history), pruned as the history is. Large histories go out in
+  batches of whole runs; a run over the batch limit or an unreadable
+  history file makes the push fail without holding back the rest. A failed push warns and
   exits 0 (`--strict` exits 1); `--scrub-messages` removes failure
   messages before sending, keeping kind and hash; `--all` resends
   everything; `--dry-run` sends nothing. Nothing is sent until a

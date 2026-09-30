@@ -250,7 +250,7 @@ on it.
 | `--preset NAME` / `--url URL` (push) | the setting above | one-off destination override |
 | `--scrub-messages` (push) | off | remove failure messages before sending (kind and hash stay) |
 | `--all` / `--strict` / `--dry-run` (push) | off | resend accepted runs / exit 1 on a failed push / show what would be sent |
-| `.temper/pushed-runs` | written by push | run ids the destination accepted; keep it in the CI cache with the history |
+| `.temper/pushed-runs-*` | written by push | run ids each destination accepted (one file per destination); keep them in the CI cache with the history |
 
 ## Pushing history
 

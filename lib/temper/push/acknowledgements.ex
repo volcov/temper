@@ -1,26 +1,33 @@
 defmodule Temper.Push.Acknowledgements do
   @moduledoc """
-  The runs the push destination has accepted, kept next to the history so
-  CI caches them with it: `pushed-runs`, one run id per line.
+  The runs a push destination has accepted, kept next to the history so
+  CI caches them with it: one file per destination, `pushed-runs-<id>`,
+  one run id per line. `<id>` is a short hash of the destination (adapter
+  and url), so pointing the task somewhere else starts from nothing
+  instead of skipping runs the new destination never saw.
 
-  `mix temper.push` reads it to send only new runs, and appends the
-  run ids of every accepted batch. A lost file only means the next push
-  resends everything, which a destination applying each run once skips.
+  `mix temper.push` reads it to send only new runs, and adds the run ids
+  of every accepted batch. Ids of runs no longer in the history are
+  dropped as it is written, so the file shrinks with the history. A lost
+  file only means the next push resends everything, which a destination
+  applying each run once skips.
 
-  `merge/3` is pure; `read/1` and `record/2` touch the file.
+  `merge/3` and `file_name/2` are pure; `read/1` and `record/3` touch the
+  file.
   """
 
-  @file_name "pushed-runs"
-  @default_cap 50_000
-
   @doc """
-  Where the acknowledgements live for history files in `dir`.
+  The file name for the destination `adapter` with `config`.
   """
-  @spec path(Path.t()) :: Path.t()
-  def path(dir), do: Path.join(dir, @file_name)
+  @spec file_name(module(), keyword()) :: String.t()
+  def file_name(adapter, config) do
+    destination = inspect(adapter) <> " " <> to_string(config[:url])
+    hash = :sha256 |> :crypto.hash(destination) |> Base.encode16(case: :lower)
+    "pushed-runs-" <> binary_part(hash, 0, 8)
+  end
 
   @doc """
-  The acknowledged run ids, or an empty set when there is no file yet.
+  The accepted run ids, or an empty set when there is no file yet.
   """
   @spec read(Path.t()) :: MapSet.t(String.t())
   def read(path) do
@@ -31,13 +38,14 @@ defmodule Temper.Push.Acknowledgements do
   end
 
   @doc """
-  Adds `run_ids` to the file, keeping the newest #{@default_cap} ids. The
-  file is replaced atomically: written to a new file beside it (created
-  exclusively, so an existing file or link there is never written
-  through), then renamed over it.
+  Adds `run_ids` to the file and keeps only the ids in `history` (a
+  `MapSet` of the run ids the history holds now). The file is replaced
+  atomically: written to a new file beside it (created exclusively, so an
+  existing file or link there is never written through), then renamed
+  over it.
   """
-  @spec record(Path.t(), [String.t()]) :: :ok | {:error, File.posix()}
-  def record(path, run_ids) do
+  @spec record(Path.t(), [String.t()], MapSet.t(String.t())) :: :ok | {:error, File.posix()}
+  def record(path, run_ids, history) do
     existing =
       case File.read(path) do
         {:ok, content} -> ids(content)
@@ -45,7 +53,7 @@ defmodule Temper.Push.Acknowledgements do
       end
 
     tmp = "#{path}.#{System.unique_integer([:positive])}.tmp"
-    content = Enum.map(merge(existing, run_ids), &[&1, "\n"])
+    content = Enum.map(merge(existing, run_ids, history), &[&1, "\n"])
 
     with :ok <- File.mkdir_p(Path.dirname(path)),
          :ok <- File.write(tmp, content, [:exclusive]),
@@ -59,15 +67,14 @@ defmodule Temper.Push.Acknowledgements do
   end
 
   @doc """
-  `existing` followed by the ids of `new` not already in it, keeping the
-  last `cap`.
+  `existing` followed by the ids of `new` not already in it, keeping only
+  ids in `history`.
   """
-  @spec merge([String.t()], [String.t()], pos_integer()) :: [String.t()]
-  def merge(existing, new, cap \\ @default_cap) do
-    known = MapSet.new(existing)
-    fresh = new |> Enum.uniq() |> Enum.reject(&MapSet.member?(known, &1))
-
-    (existing ++ fresh) |> Enum.take(-cap)
+  @spec merge([String.t()], [String.t()], MapSet.t(String.t())) :: [String.t()]
+  def merge(existing, new, history) do
+    (existing ++ new)
+    |> Enum.uniq()
+    |> Enum.filter(&MapSet.member?(history, &1))
   end
 
   defp ids(content) do

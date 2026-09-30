@@ -17,7 +17,13 @@ defmodule Temper.Push.Payload do
 
   The lines are split into batches of whole runs, each at most
   `max_batch_bytes` uncompressed (32 MB by default), and each batch is
-  gzip compressed. A run larger than that goes alone.
+  gzip compressed. A run is never split (a receiver applies a run once,
+  so a second half would be dropped): a run larger than the limit is not
+  sent, and is listed in `:oversized`.
+
+  A line that cannot be read is dropped, and the rest of its run is sent
+  without it. History files are append-only, so the line cannot come
+  back; holding the run back would lose all of it.
   """
 
   @default_max_batch_bytes 32_000_000
@@ -27,7 +33,9 @@ defmodule Temper.Push.Payload do
           lines: non_neg_integer(),
           runs: non_neg_integer(),
           acknowledged: non_neg_integer(),
-          corrupt: non_neg_integer()
+          corrupt: non_neg_integer(),
+          oversized: [String.t()],
+          history_run_ids: MapSet.t(String.t())
         }
 
   @doc """
@@ -36,7 +44,9 @@ defmodule Temper.Push.Payload do
 
   Options: `:all` (send acknowledged runs too), `:scrub_messages`,
   `:max_batch_bytes`. `:acknowledged` and `:corrupt` count the lines left
-  out for each reason; `:lines` and `:runs` describe what is sent.
+  out for each reason; `:lines` and `:runs` describe what is in the
+  batches; `:oversized` names the runs too large to send, and
+  `:history_run_ids` every run in `lines`, sent or not.
   """
   @spec build([String.t()], MapSet.t(String.t()), keyword()) :: t()
   def build(lines, acknowledged, opts \\ []) do
@@ -44,28 +54,42 @@ defmodule Temper.Push.Payload do
     scrub? = Keyword.get(opts, :scrub_messages, false)
     max_bytes = Keyword.get(opts, :max_batch_bytes, @default_max_batch_bytes)
 
-    {kept, counts} =
+    initial = %{kept: [], acknowledged: 0, corrupt: 0, seen: MapSet.new()}
+
+    acc =
       lines
       |> Stream.map(&String.trim/1)
       |> Stream.reject(&(&1 == ""))
       |> Stream.uniq()
-      |> Enum.reduce({[], %{acknowledged: 0, corrupt: 0}}, fn line, {kept, counts} ->
+      |> Enum.reduce(initial, fn line, acc ->
         case classify(line, acknowledged, all?, scrub?) do
-          {:send, run_id, line} -> {[{run_id, line} | kept], counts}
-          reason -> {kept, Map.update!(counts, reason, &(&1 + 1))}
+          {:send, run_id, line} -> %{acc | kept: [{run_id, line} | acc.kept]} |> seen(run_id)
+          {:acknowledged, run_id} -> %{acc | acknowledged: acc.acknowledged + 1} |> seen(run_id)
+          :corrupt -> %{acc | corrupt: acc.corrupt + 1}
         end
       end)
 
-    runs = kept |> Enum.reverse() |> group_by_run()
+    {runs, oversized} =
+      acc.kept
+      |> Enum.reverse()
+      |> group_by_run()
+      |> Enum.split_with(fn {_run_id, lines} -> size(lines) <= max_bytes end)
 
     %{
       batches: runs |> pack(max_bytes) |> Enum.map(&batch/1),
-      lines: length(kept),
+      lines: runs |> Enum.map(fn {_run_id, lines} -> length(lines) end) |> Enum.sum(),
       runs: Enum.count(runs, fn {run_id, _lines} -> run_id != nil end),
-      acknowledged: counts.acknowledged,
-      corrupt: counts.corrupt
+      acknowledged: acc.acknowledged,
+      corrupt: acc.corrupt,
+      oversized: for({run_id, _lines} <- oversized, do: run_id || "(lines without a run id)"),
+      history_run_ids: acc.seen
     }
   end
+
+  defp seen(acc, nil), do: acc
+  defp seen(acc, run_id), do: %{acc | seen: MapSet.put(acc.seen, run_id)}
+
+  defp size(lines), do: Enum.reduce(lines, 0, &(byte_size(&1) + 1 + &2))
 
   defp classify(line, acknowledged, all?, scrub?) do
     case Jason.decode(line) do
@@ -80,7 +104,7 @@ defmodule Temper.Push.Payload do
     line = if scrub?, do: scrub(line, decoded), else: line
 
     if not all? and run_id != nil and MapSet.member?(acknowledged, run_id),
-      do: :acknowledged,
+      do: {:acknowledged, run_id},
       else: {:send, run_id, line}
   end
 
@@ -109,7 +133,7 @@ defmodule Temper.Push.Payload do
       runs,
       {[], 0},
       fn {_run_id, lines} = run, {batch, size} ->
-        run_size = Enum.reduce(lines, 0, &(byte_size(&1) + 1 + &2))
+        run_size = size(lines)
 
         if batch != [] and size + run_size > max_bytes,
           do: {:cont, Enum.reverse(batch), {[run], run_size}},

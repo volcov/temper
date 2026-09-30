@@ -132,9 +132,10 @@ when history matters most):
     SINTER_TOKEN: ${{ secrets.SINTER_TOKEN }}
 ```
 
-The task records the runs the destination accepted in
-`.temper/pushed-runs`, inside the directory the cache already saves, so
-each push sends only the runs recorded since the last one. On GitHub
+The task records the runs the destination accepted in a
+`.temper/pushed-runs-*` file (one per destination), inside the directory
+the cache already saves, so each push sends only the runs recorded since
+the last one. On GitHub
 Actions the cache is saved at the end of the job, after this step. A
 push that fails warns and leaves the build green (add `--strict` to fail
 it instead); what it did not deliver goes out with the next push.

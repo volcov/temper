@@ -62,9 +62,20 @@ yet, as recorded (schema v1, see the
   the tests themselves.
 
 The lines are grouped into batches of whole runs, each at most 32 MB
-uncompressed, and sent one batch at a time. The run ids a destination
-accepts are appended to `pushed-runs` next to the history files, and
-left out of the next push. `--all` ignores that file.
+uncompressed, and sent one batch at a time. A run is never split: one
+larger than the limit is not sent, and the push reports it as failed
+(the other batches still go). The same goes for a history file that
+cannot be read.
+
+The run ids a destination accepts are kept in a `pushed-runs-<id>` file
+next to the history files, one file per destination (`<id>` hashes the
+adapter and url, so switching destinations starts from nothing), and
+left out of the next push. Ids of runs no longer in the history are
+dropped from it. `--all` ignores the file.
+
+A line that cannot be read (a truncated cache tail) is dropped, and the
+rest of its run is still sent: history files are append-only, so the
+line cannot come back, and holding the run back would lose all of it.
 
 ## The HTTP protocol
 
@@ -94,7 +105,7 @@ cat .temper/history-*.jsonl | gzip | curl --fail-with-body \
   --data-binary @- https://ci-history.example.com/ingest
 ```
 
-It sends everything every time (no `pushed-runs`), which a receiver
+It sends everything every time (no `pushed-runs-*`), which a receiver
 applying each run once handles, and needs a receiver that accepts the
 whole history in one request.
 
@@ -121,7 +132,7 @@ words in its summary are `runs_new`, `runs_known`, `runs_without_sha`,
 
 A receiver should apply each run once: a run is identified by its
 `run_id` (random per suite run), and the same run may arrive again
-whenever `pushed-runs` is lost with a CI cache or `--all` is used.
+whenever `pushed-runs-*` is lost with a CI cache or `--all` is used.
 
 ### A refusal
 

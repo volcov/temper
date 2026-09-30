@@ -5,7 +5,9 @@ defmodule Mix.Tasks.Temper.PushTest do
 
   import Mox
 
+  alias Temper.Push.Acknowledgements
   alias Temper.Push.AdapterMock
+  alias Temper.Push.Adapters.HTTP
   alias Temper.Push.HTTPClientMock
 
   setup :verify_on_exit!
@@ -41,7 +43,8 @@ defmodule Mix.Tasks.Temper.PushTest do
 
     Application.put_env(:temper, :push, adapter: AdapterMock, bucket: "b")
 
-    {:ok, dir: dir, pushed_runs: Path.join(dir, ".temper/pushed-runs")}
+    pushed_runs = Path.join([dir, ".temper", Acknowledgements.file_name(AdapterMock, [])])
+    {:ok, dir: dir, pushed_runs: pushed_runs}
   end
 
   defp line(run_id, name, extra \\ %{}) do
@@ -67,6 +70,11 @@ defmodule Mix.Tasks.Temper.PushTest do
   end
 
   defp run_push(args \\ []), do: Mix.Task.rerun("temper.push", args)
+
+  defp sinter_pushed_runs(ctx) do
+    name = Acknowledgements.file_name(HTTP, url: "https://sinterlab.dev/api/v1/ingest")
+    Path.join([ctx.dir, ".temper", name])
+  end
 
   defp messages do
     receive_all([])
@@ -163,7 +171,7 @@ defmodule Mix.Tasks.Temper.PushTest do
 
   test "a failure midway keeps the batches already accepted", ctx do
     # A tiny batch size: one run per batch.
-    Application.put_env(:temper, :push, adapter: AdapterMock, max_batch_bytes: 10)
+    Application.put_env(:temper, :push, adapter: AdapterMock, max_batch_bytes: 150)
     write_history(ctx.dir, 0, [line(@run_a, "t1"), line(@run_b, "t1")])
 
     AdapterMock
@@ -184,7 +192,7 @@ defmodule Mix.Tasks.Temper.PushTest do
   end
 
   test "counters are added up across batches, unknown ones listed by name", ctx do
-    Application.put_env(:temper, :push, adapter: AdapterMock, max_batch_bytes: 10)
+    Application.put_env(:temper, :push, adapter: AdapterMock, max_batch_bytes: 150)
     write_history(ctx.dir, 0, [line(@run_a, "t1"), line(@run_b, "t1")])
 
     expect(AdapterMock, :push, 2, fn batch, _config ->
@@ -229,8 +237,64 @@ defmodule Mix.Tasks.Temper.PushTest do
 
     run_push(["--history", Path.join(other, "*.jsonl")])
 
-    assert File.read!(Path.join(other, "pushed-runs")) == @run_a <> "\n"
+    assert File.read!(Path.join(other, Acknowledgements.file_name(AdapterMock, []))) ==
+             @run_a <> "\n"
+
     refute File.exists?(ctx.pushed_runs)
+  end
+
+  test "another destination starts from nothing", ctx do
+    write_history(ctx.dir, 0, [line(@run_a, "t1")])
+    File.write!(ctx.pushed_runs, @run_a <> "\n")
+
+    Application.put_env(:temper, :push, adapter: AdapterMock, url: "https://elsewhere")
+    expect(AdapterMock, :push, fn %{run_ids: [@run_a]}, _config -> {:ok, [@run_a], %{}} end)
+
+    run_push()
+  end
+
+  test "an unreadable history file is a failed push; the rest still goes", ctx do
+    write_history(ctx.dir, 0, [line(@run_a, "t1")])
+    unreadable = Path.join(ctx.dir, ".temper/history-2.jsonl")
+    File.write!(unreadable, line(@run_b, "t1"))
+    File.chmod!(unreadable, 0o000)
+    on_exit(fn -> File.chmod(unreadable, 0o644) end)
+
+    expect(AdapterMock, :push, fn %{run_ids: [@run_a]}, _config -> {:ok, [@run_a], %{}} end)
+
+    assert catch_exit(run_push(["--strict"])) == {:shutdown, 1}
+
+    assert [
+             {:info, "Pushed history: 1 run accepted."},
+             {:error, "Could not read 1 history file: " <> _}
+           ] = messages()
+  end
+
+  test "when no history file can be read, the push fails instead of finding nothing", ctx do
+    unreadable = Path.join(ctx.dir, ".temper/history-0.jsonl")
+    File.write!(unreadable, line(@run_a, "t1"))
+    File.chmod!(unreadable, 0o000)
+    on_exit(fn -> File.chmod(unreadable, 0o644) end)
+
+    assert catch_exit(run_push(["--strict"])) == {:shutdown, 1}
+    assert [{:error, "Could not read 1 history file: " <> _}] = messages()
+  end
+
+  test "a run over the batch limit is not sent and fails the push; the others go", ctx do
+    Application.put_env(:temper, :push, adapter: AdapterMock, max_batch_bytes: 200)
+    write_history(ctx.dir, 0, [line(@run_a, String.duplicate("x", 500)), line(@run_b, "t1")])
+
+    expect(AdapterMock, :push, fn %{run_ids: [@run_b]}, _config -> {:ok, [@run_b], %{}} end)
+
+    run_push()
+
+    assert File.read!(ctx.pushed_runs) == @run_b <> "\n"
+
+    assert [
+             {:info, "Pushed history: 1 run accepted."},
+             {:error, "1 run larger than the 200 B batch limit not sent (" <> _},
+             {:error, "Not failing the build (pass --strict to)."}
+           ] = messages()
   end
 
   test "a history with nothing usable says so", ctx do
@@ -297,7 +361,7 @@ defmodule Mix.Tasks.Temper.PushTest do
       end)
 
       run_push(["--preset", "sinter"])
-      assert File.read!(ctx.pushed_runs) == @run_a <> "\n"
+      assert File.read!(sinter_pushed_runs(ctx)) == @run_a <> "\n"
     end
 
     test "posts to sinterlab.dev with the token, and never prints it", ctx do
@@ -322,13 +386,14 @@ defmodule Mix.Tasks.Temper.PushTest do
       run_push(["--preset", "sinter"])
 
       assert [{:info, summary}] = messages()
+      pushed_runs = sinter_pushed_runs(ctx)
 
       assert summary ==
                "Pushed history: 1 run accepted. 1 new. " <>
                  "1 without a clean commit (not used for flake detection)."
 
       refute summary =~ "sntr_secret"
-      assert File.read!(ctx.pushed_runs) == @run_a <> "\n"
+      assert File.read!(pushed_runs) == @run_a <> "\n"
     end
 
     test "--url points the preset elsewhere", ctx do

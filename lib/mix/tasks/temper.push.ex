@@ -9,10 +9,15 @@ defmodule Mix.Tasks.Temper.Push do
 
   Reads every `.temper/history-*.jsonl` file (all partitions) and sends
   the runs the destination has not acknowledged yet. The destination
-  answers with the runs it now holds; they are appended to `pushed-runs`
-  next to the history files, so the next push leaves them out. Keep that
-  file in the same CI cache as the history. A push that fails records
-  nothing, and a fresh cache simply resends everything.
+  answers with the runs it now holds; they are kept in a `pushed-runs-*`
+  file next to the history files (one per destination), so the next push
+  leaves them out. Keep it in the same CI cache as the history. A push
+  that fails records nothing, and a fresh cache simply resends
+  everything.
+
+  A history file that cannot be read, or a run larger than the batch
+  limit, is not sent and makes the push count as failed (a warning, or
+  exit 1 with `--strict`); everything else still goes.
 
   The destination comes from `config :temper, :push` (or `--preset`):
 
@@ -105,35 +110,43 @@ defmodule Mix.Tasks.Temper.Push do
   end
 
   defp push_files(files, adapter, config, opts) do
-    acknowledgements = files |> hd() |> Path.dirname() |> Acknowledgements.path()
+    dir = files |> hd() |> Path.dirname()
+    acknowledgements = Path.join(dir, Acknowledgements.file_name(adapter, config))
+    {lines, unreadable} = read_lines(files)
 
     payload =
-      files
-      |> read_lines()
-      |> Payload.build(
+      Payload.build(
+        lines,
         Acknowledgements.read(acknowledgements),
         [all: opts[:all] == true, scrub_messages: opts[:scrub_messages] == true] ++
           Keyword.take(config, [:max_batch_bytes])
       )
 
+    # What cannot go out this time: a failed push even if the rest goes.
+    problems = unreadable_problem(unreadable) ++ oversized_problem(payload.oversized, config)
+
     cond do
-      payload.batches == [] ->
+      payload.batches == [] and problems == [] ->
         Mix.shell().info(nothing_to_push(payload, files))
 
       opts[:dry_run] ->
         Mix.shell().info(dry_run_message(payload, adapter, config))
+        Enum.each(problems, fn message -> Mix.shell().error(message) end)
+
+      payload.batches == [] ->
+        fail(problems, opts)
 
       true ->
-        send_batches(payload, adapter, config, acknowledgements, opts)
+        send_batches(payload, adapter, config, acknowledgements, problems, opts)
     end
   end
 
-  defp send_batches(payload, adapter, config, acknowledgements, opts) do
+  defp send_batches(payload, adapter, config, acknowledgements, problems, opts) do
     {accepted, details, failure} =
       Enum.reduce_while(payload.batches, {0, %{}, nil}, fn batch, {accepted, details, nil} ->
         case push_batch(adapter, batch, config) do
           {:ok, run_ids, batch_details} ->
-            record(acknowledgements, run_ids)
+            record(acknowledgements, run_ids, payload.history_run_ids)
             {:cont, {accepted + length(run_ids), add(details, batch_details), nil}}
 
           {:error, message} ->
@@ -142,7 +155,30 @@ defmodule Mix.Tasks.Temper.Push do
       end)
 
     if accepted > 0 or details != %{}, do: Mix.shell().info(summary(accepted, details))
-    if failure, do: fail(failure, opts)
+
+    case List.wrap(failure) ++ problems do
+      [] -> :ok
+      messages -> fail(messages, opts)
+    end
+  end
+
+  defp unreadable_problem([]), do: []
+
+  defp unreadable_problem(files) do
+    ["Could not read #{plural(length(files), "history file")}: #{Enum.join(files, ", ")}."]
+  end
+
+  defp oversized_problem([], _config), do: []
+
+  defp oversized_problem(run_ids, config) do
+    limit = format_bytes(config[:max_batch_bytes] || 32_000_000)
+    shown = run_ids |> Enum.take(5) |> Enum.join(", ")
+    more = if length(run_ids) > 5, do: " and #{length(run_ids) - 5} more", else: ""
+
+    [
+      "#{plural(length(run_ids), "run")} larger than the #{limit} batch limit not sent " <>
+        "(#{shown}#{more}). Raise max_batch_bytes if the destination accepts more."
+    ]
   end
 
   # A crashing adapter (or one that is not there) is a failed push like
@@ -169,8 +205,8 @@ defmodule Mix.Tasks.Temper.Push do
 
   # The acknowledgements only save work later, so failing to write them
   # is a warning, never a failed push.
-  defp record(path, run_ids) do
-    case Acknowledgements.record(path, run_ids) do
+  defp record(path, run_ids, history) do
+    case Acknowledgements.record(path, run_ids, history) do
       :ok ->
         :ok
 
@@ -181,17 +217,18 @@ defmodule Mix.Tasks.Temper.Push do
     end
   end
 
+  # The lines of every readable file, and the files that could not be
+  # read (each with its reason).
   defp read_lines(files) do
-    Enum.flat_map(files, fn file ->
-      case File.read(file) do
-        {:ok, content} ->
-          String.split(content, "\n")
+    {lines, unreadable} =
+      Enum.reduce(files, {[], []}, fn file, {lines, unreadable} ->
+        case File.read(file) do
+          {:ok, content} -> {[String.split(content, "\n") | lines], unreadable}
+          {:error, reason} -> {lines, ["#{file} (#{inspect(reason)})" | unreadable]}
+        end
+      end)
 
-        {:error, reason} ->
-          Mix.shell().error("Could not read #{file} (#{inspect(reason)}).")
-          []
-      end
-    end)
+    {lines |> Enum.reverse() |> Enum.concat(), Enum.reverse(unreadable)}
   end
 
   defp add(details, batch_details) do
@@ -232,8 +269,8 @@ defmodule Mix.Tasks.Temper.Push do
       note(payload.corrupt, "corrupt lines left out")
   end
 
-  defp fail(message, opts) do
-    Mix.shell().error(message)
+  defp fail(messages, opts) do
+    Enum.each(List.wrap(messages), fn message -> Mix.shell().error(message) end)
 
     if opts[:strict] do
       exit({:shutdown, 1})

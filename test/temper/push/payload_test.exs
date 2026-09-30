@@ -115,8 +115,28 @@ defmodule Temper.Push.PayloadTest do
     assert length(inflate(first)) == 10
     assert first.bytes == run_size
 
-    # A run larger than the limit still goes, alone.
-    assert [%{run_ids: [@run_a]}, %{run_ids: [@run_b]}] =
-             Payload.build(lines, MapSet.new(), max_batch_bytes: 10).batches
+    # A run larger than the limit is never split, and not sent.
+    oversized = Payload.build(lines, MapSet.new(), max_batch_bytes: run_size - 1)
+    assert oversized.batches == []
+    assert oversized.oversized == [@run_a, @run_b]
+    assert oversized.lines == 0
+  end
+
+  test "an oversized run does not hold back the others" do
+    big = line(@run_a, String.duplicate("x", 500))
+    lines = [big, line(@run_b, "t1")]
+
+    payload = Payload.build(lines, MapSet.new(), max_batch_bytes: 200)
+
+    assert [%{run_ids: [@run_b]}] = payload.batches
+    assert payload.oversized == [@run_a]
+    assert payload.runs == 1
+  end
+
+  test "every run in the history is reported, sent or not" do
+    lines = [line(@run_a, "t1"), line(@run_b, "t1"), "{corrupt"]
+
+    assert Payload.build(lines, MapSet.new([@run_a])).history_run_ids ==
+             MapSet.new([@run_a, @run_b])
   end
 end
