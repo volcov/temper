@@ -131,22 +131,25 @@ defmodule Mix.Tasks.Temper.Push do
 
       opts[:dry_run] ->
         Mix.shell().info(dry_run_message(payload, adapter, config))
-        Enum.each(problems, fn message -> Mix.shell().error(message) end)
+        if problems != [], do: fail(problems, opts)
 
       payload.batches == [] ->
         fail(problems, opts)
 
       true ->
-        send_batches(payload, adapter, config, acknowledgements, problems, opts)
+        # With part of the history unreadable, absent runs may still be
+        # there: keep their acknowledgements.
+        history = if unreadable == [], do: payload.history_run_ids
+        send_batches(payload, adapter, config, {acknowledgements, history}, problems, opts)
     end
   end
 
-  defp send_batches(payload, adapter, config, acknowledgements, problems, opts) do
+  defp send_batches(payload, adapter, config, {acknowledgements, history}, problems, opts) do
     {accepted, details, failure} =
       Enum.reduce_while(payload.batches, {0, %{}, nil}, fn batch, {accepted, details, nil} ->
         case push_batch(adapter, batch, config) do
           {:ok, run_ids, batch_details} ->
-            record(acknowledgements, run_ids, payload.history_run_ids)
+            record(acknowledgements, run_ids, history)
             {:cont, {accepted + length(run_ids), add(details, batch_details), nil}}
 
           {:error, message} ->

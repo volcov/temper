@@ -5,19 +5,26 @@ defmodule Temper.Push.AcknowledgementsTest do
 
   @moduletag :tmp_dir
 
-  test "file_name/2 differs per destination and is stable for one" do
-    sinter = Acknowledgements.file_name(Temper.Push.Adapters.HTTP, url: "https://sinterlab.dev/i")
+  defmodule NoKeyAdapter do
+    @behaviour Temper.Push.Adapter
+    @impl true
+    def push(batch, _config), do: {:ok, batch.run_ids, %{}}
+  end
 
-    assert sinter =~ ~r/\Apushed-runs-[0-9a-f]{8}\z/
+  test "file_name/2 follows the whole config of an adapter without a key" do
+    name = Acknowledgements.file_name(NoKeyAdapter, bucket: "a", region: "eu")
 
-    assert sinter ==
-             Acknowledgements.file_name(Temper.Push.Adapters.HTTP,
-               url: "https://sinterlab.dev/i",
-               token_env: "X"
+    assert name =~ ~r/\Apushed-runs-[0-9a-f]{8}\z/
+    assert name == Acknowledgements.file_name(NoKeyAdapter, region: "eu", bucket: "a")
+
+    assert name ==
+             Acknowledgements.file_name(NoKeyAdapter,
+               bucket: "a",
+               region: "eu",
+               max_batch_bytes: 1
              )
 
-    refute sinter == Acknowledgements.file_name(Temper.Push.Adapters.HTTP, url: "https://other/i")
-    refute sinter == Acknowledgements.file_name(MyAdapter, url: "https://sinterlab.dev/i")
+    refute name == Acknowledgements.file_name(NoKeyAdapter, bucket: "b", region: "eu")
   end
 
   test "merge/3 adds new ids once and keeps only runs still in the history" do
@@ -25,6 +32,8 @@ defmodule Temper.Push.AcknowledgementsTest do
 
     assert Acknowledgements.merge(["a", "b"], ["c", "c", "d"], history) == ["b", "c", "d"]
     assert Acknowledgements.merge([], [], history) == []
+    # Without a complete history, nothing is pruned.
+    assert Acknowledgements.merge(["a", "b"], ["c"], nil) == ["a", "b", "c"]
   end
 
   test "a missing file reads as nothing accepted", %{tmp_dir: dir} do

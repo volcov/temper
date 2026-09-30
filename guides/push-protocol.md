@@ -68,10 +68,13 @@ larger than the limit is not sent, and the push reports it as failed
 cannot be read.
 
 The run ids a destination accepts are kept in a `pushed-runs-<id>` file
-next to the history files, one file per destination (`<id>` hashes the
-adapter and url, so switching destinations starts from nothing), and
-left out of the next push. Ids of runs no longer in the history are
-dropped from it. `--all` ignores the file.
+next to the history files, one file per destination, and left out of the
+next push. `<id>` hashes the destination: for the HTTP adapter its url
+and a digest of the token (one endpoint can serve many repositories by
+token), for other adapters their whole config. Switching destinations
+starts from nothing; a new token resends once. Ids of runs no longer in
+the history are dropped from the file, except when part of the history
+could not be read. `--all` ignores the file.
 
 A line that cannot be read (a truncated cache tail) is dropped, and the
 rest of its run is still sent: history files are append-only, so the
@@ -176,3 +179,10 @@ the destination now holds (they are recorded and not sent again) and a
 map of integer counters to print (string keys), or
 `{:error, message}` for the CI log. An adapter that raises is reported
 as a failed push, like an error.
+
+Accepted runs are recorded per destination, and by default any change
+to the adapter's config (other than `max_batch_bytes`) counts as a new
+destination. If some options do not change where history goes, or a
+secret does (a token that selects a repository), implement the optional
+`destination_key/1` callback and return what identifies the destination,
+with secrets hashed.

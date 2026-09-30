@@ -46,4 +46,30 @@ defmodule Temper.Push.Adapter do
   @callback push(batch(), config :: keyword()) ::
               {:ok, accepted_run_ids :: [String.t()], details :: map()}
               | {:error, message :: String.t()}
+
+  @doc """
+  Optional. Identifies where `config` sends history, so each destination
+  keeps its own record of accepted runs (see
+  `Temper.Push.Acknowledgements`). Two configs with the same key must
+  reach the same stored history.
+
+  Without it, the key is the whole config except `:max_batch_bytes`: any
+  other option change (a url, a bucket) counts as a new destination. Keep
+  secrets out of the returned term's plain form; hash them if they tell
+  destinations apart, as `Temper.Push.Adapters.HTTP` does with its token.
+  """
+  @callback destination_key(config :: keyword()) :: term()
+
+  @optional_callbacks destination_key: 1
+
+  @doc """
+  The destination key for `adapter` with `config` (see
+  `c:destination_key/1`).
+  """
+  @spec destination_key(module(), keyword()) :: term()
+  def destination_key(adapter, config) do
+    if Code.ensure_loaded?(adapter) and function_exported?(adapter, :destination_key, 1),
+      do: adapter.destination_key(config),
+      else: config |> Keyword.delete(:max_batch_bytes) |> Enum.sort()
+  end
 end

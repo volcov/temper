@@ -7,10 +7,20 @@ defmodule Mix.Tasks.Temper.PushTest do
 
   alias Temper.Push.Acknowledgements
   alias Temper.Push.AdapterMock
-  alias Temper.Push.Adapters.HTTP
+  alias Temper.Push.Destination
   alias Temper.Push.HTTPClientMock
 
   setup :verify_on_exit!
+
+  # Mox defines the optional callback too; answer it like an adapter
+  # without one (the whole config but the batch size).
+  setup do
+    stub(AdapterMock, :destination_key, fn config ->
+      config |> Keyword.delete(:max_batch_bytes) |> Enum.sort()
+    end)
+
+    :ok
+  end
 
   @run_a "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   @run_b "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
@@ -43,8 +53,7 @@ defmodule Mix.Tasks.Temper.PushTest do
 
     Application.put_env(:temper, :push, adapter: AdapterMock, bucket: "b")
 
-    pushed_runs = Path.join([dir, ".temper", Acknowledgements.file_name(AdapterMock, [])])
-    {:ok, dir: dir, pushed_runs: pushed_runs}
+    {:ok, dir: dir}
   end
 
   defp line(run_id, name, extra \\ %{}) do
@@ -71,10 +80,16 @@ defmodule Mix.Tasks.Temper.PushTest do
 
   defp run_push(args \\ []), do: Mix.Task.rerun("temper.push", args)
 
-  defp sinter_pushed_runs(ctx) do
-    name = Acknowledgements.file_name(HTTP, url: "https://sinterlab.dev/api/v1/ingest")
-    Path.join([ctx.dir, ".temper", name])
+  # Where the task keeps accepted runs for the configured destination
+  # (and flags), as it resolves them.
+  defp pushed_runs(ctx, flags \\ []) do
+    {:ok, adapter, config} =
+      Destination.resolve(Application.get_env(:temper, :push, []), flags)
+
+    Path.join([ctx.dir, ".temper", Acknowledgements.file_name(adapter, config)])
   end
+
+  defp sinter_pushed_runs(ctx), do: pushed_runs(ctx, preset: "sinter")
 
   defp messages do
     receive_all([])
@@ -100,13 +115,13 @@ defmodule Mix.Tasks.Temper.PushTest do
 
     run_push()
 
-    assert File.read!(ctx.pushed_runs) == "#{@run_a}\n#{@run_b}\n"
+    assert File.read!(pushed_runs(ctx)) == "#{@run_a}\n#{@run_b}\n"
     assert [{:info, "Pushed history: 2 runs accepted. 2 new."}] = messages()
   end
 
   test "the next push sends only new runs, and nothing when there are none", ctx do
     write_history(ctx.dir, 0, [line(@run_a, "t1")])
-    File.write!(ctx.pushed_runs, @run_a <> "\n")
+    File.write!(pushed_runs(ctx), @run_a <> "\n")
 
     run_push()
 
@@ -120,17 +135,17 @@ defmodule Mix.Tasks.Temper.PushTest do
     end)
 
     run_push()
-    assert File.read!(ctx.pushed_runs) == "#{@run_a}\n#{@run_b}\n"
+    assert File.read!(pushed_runs(ctx)) == "#{@run_a}\n#{@run_b}\n"
   end
 
   test "--all sends acknowledged runs too", ctx do
     write_history(ctx.dir, 0, [line(@run_a, "t1")])
-    File.write!(ctx.pushed_runs, @run_a <> "\n")
+    File.write!(pushed_runs(ctx), @run_a <> "\n")
 
     expect(AdapterMock, :push, fn %{run_ids: [@run_a]}, _config -> {:ok, [@run_a], %{}} end)
 
     run_push(["--all"])
-    assert File.read!(ctx.pushed_runs) == "#{@run_a}\n"
+    assert File.read!(pushed_runs(ctx)) == "#{@run_a}\n"
   end
 
   test "--scrub-messages removes failure messages before the adapter sees them", ctx do
@@ -154,7 +169,7 @@ defmodule Mix.Tasks.Temper.PushTest do
 
     run_push()
 
-    refute File.exists?(ctx.pushed_runs)
+    refute File.exists?(pushed_runs(ctx))
 
     assert [
              {:error, "The upload was refused (429): slow down"},
@@ -182,7 +197,7 @@ defmodule Mix.Tasks.Temper.PushTest do
 
     run_push()
 
-    assert File.read!(ctx.pushed_runs) == "#{@run_a}\n"
+    assert File.read!(pushed_runs(ctx)) == "#{@run_a}\n"
 
     assert [
              {:info, "Pushed history: 1 run accepted."},
@@ -215,7 +230,7 @@ defmodule Mix.Tasks.Temper.PushTest do
              {:error, "Not failing the build (pass --strict to)."}
            ] = messages()
 
-    refute File.exists?(ctx.pushed_runs)
+    refute File.exists?(pushed_runs(ctx))
   end
 
   test "an adapter that does not exist is a failed push too", ctx do
@@ -237,20 +252,55 @@ defmodule Mix.Tasks.Temper.PushTest do
 
     run_push(["--history", Path.join(other, "*.jsonl")])
 
-    assert File.read!(Path.join(other, Acknowledgements.file_name(AdapterMock, []))) ==
-             @run_a <> "\n"
+    assert File.read!(Path.join(other, Path.basename(pushed_runs(ctx)))) == @run_a <> "\n"
 
-    refute File.exists?(ctx.pushed_runs)
+    refute File.exists?(pushed_runs(ctx))
   end
 
   test "another destination starts from nothing", ctx do
     write_history(ctx.dir, 0, [line(@run_a, "t1")])
-    File.write!(ctx.pushed_runs, @run_a <> "\n")
+    File.write!(pushed_runs(ctx), @run_a <> "\n")
 
     Application.put_env(:temper, :push, adapter: AdapterMock, url: "https://elsewhere")
     expect(AdapterMock, :push, fn %{run_ids: [@run_a]}, _config -> {:ok, [@run_a], %{}} end)
 
     run_push()
+  end
+
+  test "a new bucket is a new destination, even with the same adapter", ctx do
+    write_history(ctx.dir, 0, [line(@run_a, "t1")])
+    File.write!(pushed_runs(ctx), @run_a <> "\n")
+
+    Application.put_env(:temper, :push, adapter: AdapterMock, bucket: "another")
+    expect(AdapterMock, :push, fn %{run_ids: [@run_a]}, _config -> {:ok, [@run_a], %{}} end)
+
+    run_push()
+  end
+
+  test "an unreadable partition keeps its accepted runs on record", ctx do
+    write_history(ctx.dir, 0, [line(@run_a, "t1")])
+    unreadable = Path.join(ctx.dir, ".temper/history-1.jsonl")
+    File.write!(unreadable, line(@run_b, "t1"))
+    File.write!(pushed_runs(ctx), @run_b <> "\n")
+    File.chmod!(unreadable, 0o000)
+    on_exit(fn -> File.chmod(unreadable, 0o644) end)
+
+    expect(AdapterMock, :push, fn %{run_ids: [@run_a]}, _config -> {:ok, [@run_a], %{}} end)
+
+    run_push()
+
+    # The run of the partition that could not be read stays acknowledged.
+    assert File.read!(pushed_runs(ctx)) == "#{@run_b}\n#{@run_a}\n"
+  end
+
+  test "--dry-run --strict fails on what could not be sent", ctx do
+    Application.put_env(:temper, :push, adapter: AdapterMock, max_batch_bytes: 200)
+    write_history(ctx.dir, 0, [line(@run_a, String.duplicate("x", 500)), line(@run_b, "t1")])
+
+    assert catch_exit(run_push(["--dry-run", "--strict"])) == {:shutdown, 1}
+
+    assert [{:info, "Would push 1 run " <> _}, {:error, "1 run larger than the 200 B" <> _}] =
+             messages()
   end
 
   test "an unreadable history file is a failed push; the rest still goes", ctx do
@@ -288,7 +338,7 @@ defmodule Mix.Tasks.Temper.PushTest do
 
     run_push()
 
-    assert File.read!(ctx.pushed_runs) == @run_b <> "\n"
+    assert File.read!(pushed_runs(ctx)) == @run_b <> "\n"
 
     assert [
              {:info, "Pushed history: 1 run accepted."},
@@ -316,7 +366,7 @@ defmodule Mix.Tasks.Temper.PushTest do
     assert [{:info, message}] = messages()
     assert message =~ ~r/\AWould push 1 run \(1 line, \d+ B compressed, 1 batch\) /
     assert message =~ "to Temper.Push.AdapterMock. Nothing was sent. 1 corrupt lines left out."
-    refute File.exists?(ctx.pushed_runs)
+    refute File.exists?(pushed_runs(ctx))
   end
 
   test "nothing configured pushes nothing, and --strict exits 1", ctx do

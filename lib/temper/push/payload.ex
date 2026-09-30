@@ -81,7 +81,7 @@ defmodule Temper.Push.Payload do
       runs: Enum.count(runs, fn {run_id, _lines} -> run_id != nil end),
       acknowledged: acc.acknowledged,
       corrupt: acc.corrupt,
-      oversized: for({run_id, _lines} <- oversized, do: run_id || "(lines without a run id)"),
+      oversized: for({run_id, _lines} <- oversized, do: run_id || "(a line without a run id)"),
       history_run_ids: acc.seen
     }
   end
@@ -115,17 +115,28 @@ defmodule Temper.Push.Payload do
   defp scrub(line, _decoded), do: line
 
   # Runs in the order they first appear, each with its lines in file
-  # order. Lines without a run id form one group of their own.
+  # order. A line without a run id is a group of its own, so one large
+  # such line never holds back the others.
   defp group_by_run(kept) do
     {order, groups} =
-      Enum.reduce(kept, {[], %{}}, fn {run_id, line}, {order, groups} ->
-        case groups do
-          %{^run_id => lines} -> {order, Map.put(groups, run_id, [line | lines])}
-          _new -> {[run_id | order], Map.put(groups, run_id, [line])}
-        end
+      Enum.reduce(kept, {[], %{}}, fn
+        {nil, line}, {order, groups} ->
+          key = {:line, map_size(groups)}
+          {[key | order], Map.put(groups, key, [line])}
+
+        {run_id, line}, {order, groups} ->
+          case groups do
+            %{^run_id => lines} -> {order, Map.put(groups, run_id, [line | lines])}
+            _new -> {[run_id | order], Map.put(groups, run_id, [line])}
+          end
       end)
 
-    order |> Enum.reverse() |> Enum.map(&{&1, Enum.reverse(groups[&1])})
+    order
+    |> Enum.reverse()
+    |> Enum.map(fn
+      {:line, _n} = key -> {nil, groups[key]}
+      run_id -> {run_id, Enum.reverse(groups[run_id])}
+    end)
   end
 
   defp pack(runs, max_bytes) do

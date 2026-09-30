@@ -48,6 +48,20 @@ defmodule Temper.Push.Adapters.HTTP do
     end
   end
 
+  # The url and a digest of the token: one endpoint can route
+  # repositories by token, so each token is its own destination. Rotating
+  # the token resends history once, which receivers skip.
+  @impl Temper.Push.Adapter
+  def destination_key(config) do
+    token =
+      case token(config) do
+        {:ok, token} -> :sha256 |> :crypto.hash(token) |> Base.encode16(case: :lower)
+        {:error, _missing} -> nil
+      end
+
+    {config[:url], token}
+  end
+
   defp url(config) do
     with url when is_binary(url) and url != "" <- config[:url],
          %URI{scheme: scheme, host: host} when is_binary(host) and host != "" <- URI.parse(url) do

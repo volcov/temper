@@ -133,6 +133,17 @@ defmodule Temper.Push.PayloadTest do
     assert payload.runs == 1
   end
 
+  test "lines without a run id are packed one by one" do
+    notes = for i <- 1..3, do: Jason.encode!(%{"schema" => 1, "kind" => "note", "n" => i})
+    size = byte_size(hd(notes)) + 1
+
+    payload = Payload.build(notes, MapSet.new(), max_batch_bytes: size)
+
+    assert length(payload.batches) == 3
+    assert payload.oversized == []
+    assert Enum.all?(payload.batches, &(&1.run_ids == []))
+  end
+
   test "every run in the history is reported, sent or not" do
     lines = [line(@run_a, "t1"), line(@run_b, "t1"), "{corrupt"]
 

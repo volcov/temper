@@ -78,6 +78,20 @@ defmodule Temper.Push.Adapters.HTTPTest do
              {:error, "Could not reach https://example.com/ingest: :timeout"}
   end
 
+  test "the destination key is the url and a digest of the token" do
+    {url, digest} = HTTP.destination_key(@config)
+
+    assert url == "https://example.com/ingest"
+    assert digest =~ ~r/\A[0-9a-f]{64}\z/
+    refute digest =~ "tok"
+
+    System.put_env("TEMPER_TEST_PUSH_TOKEN", "another")
+    refute HTTP.destination_key(@config) == {url, digest}
+
+    System.delete_env("TEMPER_TEST_PUSH_TOKEN")
+    assert HTTP.destination_key(@config) == {url, nil}
+  end
+
   test "the token variable defaults to TEMPER_PUSH_TOKEN" do
     config = Keyword.delete(@config, :token_env)
     System.delete_env("TEMPER_PUSH_TOKEN")
