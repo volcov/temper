@@ -233,6 +233,21 @@ defmodule Mix.Tasks.Temper.PushTest do
     refute File.exists?(pushed_runs(ctx))
   end
 
+  test "an adapter whose destination key raises is a failed push, with nothing sent", ctx do
+    write_history(ctx.dir, 0, [line(@run_a, "t1")])
+    stub(AdapterMock, :destination_key, fn _config -> raise "no key" end)
+
+    run_push()
+
+    assert [
+             {:error,
+              "The Temper.Push.AdapterMock push adapter failed to name its destination: no key"},
+             {:error, "Not failing the build (pass --strict to)."}
+           ] = messages()
+
+    assert catch_exit(run_push(["--strict"])) == {:shutdown, 1}
+  end
+
   test "an adapter that does not exist is a failed push too", ctx do
     Application.put_env(:temper, :push, adapter: Temper.Push.NoSuchAdapter)
     write_history(ctx.dir, 0, [line(@run_a, "t1")])

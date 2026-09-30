@@ -111,7 +111,30 @@ defmodule Mix.Tasks.Temper.Push do
 
   defp push_files(files, adapter, config, opts) do
     dir = files |> hd() |> Path.dirname()
-    acknowledgements = Path.join(dir, Acknowledgements.file_name(adapter, config))
+
+    case acknowledgements_file(adapter, config) do
+      {:ok, name} -> push_files(files, Path.join(dir, name), adapter, config, opts)
+      {:error, message} -> fail(message, opts)
+    end
+  end
+
+  # The destination key comes from the adapter, so it can fail like push/2
+  # can. Without it the accepted runs are unknown: nothing is sent.
+  defp acknowledgements_file(adapter, config) do
+    {:ok, Acknowledgements.file_name(adapter, config)}
+  rescue
+    exception ->
+      {:error,
+       "The #{inspect(adapter)} push adapter failed to name its destination: " <>
+         Exception.message(exception)}
+  catch
+    kind, reason ->
+      {:error,
+       "The #{inspect(adapter)} push adapter failed to name its destination: " <>
+         inspect({kind, reason})}
+  end
+
+  defp push_files(files, acknowledgements, adapter, config, opts) do
     {lines, unreadable} = read_lines(files)
 
     payload =
