@@ -20,7 +20,9 @@ defmodule Temper.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
+      # :inets and :ssl for mix temper.push (Temper.Push.Httpc). Declared
+      # so Mix keeps them on the code path; OTP ships them.
+      extra_applications: [:logger, :inets, :ssl]
     ]
   end
 
@@ -28,7 +30,8 @@ defmodule Temper.MixProject do
     [
       {:jason, "~> 1.4"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:mox, "~> 1.2", only: :test}
     ]
   end
 
@@ -48,6 +51,7 @@ defmodule Temper.MixProject do
         "README.md",
         "guides/ci-recipes.md",
         "guides/history-schema.md",
+        "guides/push-protocol.md",
         "CHANGELOG.md",
         "LICENSE"
       ]

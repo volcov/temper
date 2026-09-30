@@ -105,6 +105,44 @@ format itself is a documented contract (see the
 also plain material for your own
 scripts: it is JSON Lines, one test outcome per line.
 
+## Pushing history to a collector
+
+Artifacts keep history per build. To follow flakes across every build
+of a repository, push it to a system that collects it, such as
+[Sinter](https://sinterlab.dev) or your own receiver (see the
+[Push Protocol guide](push-protocol.md)). Configure the destination:
+
+```elixir
+# config/config.exs
+config :temper, :push, preset: :sinter
+```
+
+Sinter is in private alpha, with invites from the waitlist at
+[sinterlab.dev](https://sinterlab.dev). Any receiver of the protocol
+works the same way.
+
+Then add a step after the tests, running even when they fail (that is
+when history matters most):
+
+```yaml
+- name: Push test history
+  if: ${{ !cancelled() }}
+  run: mix temper.push
+  env:
+    SINTER_TOKEN: ${{ secrets.SINTER_TOKEN }}
+```
+
+The task records the runs the destination accepted in
+`.temper/pushed-runs`, inside the directory the cache already saves, so
+each push sends only the runs recorded since the last one. On GitHub
+Actions the cache is saved at the end of the job, after this step. A
+push that fails warns and leaves the build green (add `--strict` to fail
+it instead); what it did not deliver goes out with the next push.
+
+Failure messages can hold data you would rather keep inside CI.
+`--scrub-messages` removes them before anything is sent; the failure
+kind and hash still go, so distinct failure modes still group.
+
 ## Keeping cached history bounded
 
 A cached `.temper/` grows on every run. Prune it in CI before the

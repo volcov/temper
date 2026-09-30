@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `mix temper.push` sends recorded history to a configured destination,
+  only the runs it has not accepted yet: accepted run ids are kept in
+  `pushed-runs` next to the history (cache it with the history). Large
+  histories go out in batches of whole runs. A failed push warns and
+  exits 0 (`--strict` exits 1); `--scrub-messages` removes failure
+  messages before sending, keeping kind and hash; `--all` resends
+  everything; `--dry-run` sends nothing. Nothing is sent until a
+  destination is configured.
+
+- `Temper.Push.Adapter`, the behaviour for push destinations, and
+  `Temper.Push.Adapters.HTTP`, which speaks an open push protocol
+  (gzip JSON Lines, bearer token from an environment variable, a JSON
+  answer listing the accepted run ids) over OTP's `:httpc` with verified
+  TLS, so Temper still has no HTTP dependency. It sends tokens only over
+  https (or plain http to the local machine, or with `allow_http:
+  true`), and cleans server text before printing it. `preset: :sinter` points
+  it at [Sinter](https://sinterlab.dev). The Push Protocol guide
+  documents the protocol for anyone writing a receiver or an adapter.
+
+### Changed
+
+- `:inets` and `:ssl` join Temper's extra applications (for
+  `mix temper.push`); both ship with OTP.
+
 ## [0.3.0] - 2026-09-01
 
 ### Added
